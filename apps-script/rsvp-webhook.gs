@@ -3,30 +3,32 @@
  *
  * Lives inside the couple's wedding-planning Google Sheet
  * (Extensions → Apps Script). Receives RSVP submissions from the wedding-site
- * Cloudflare Pages Function and appends them to a dedicated `RSVP_Responses`
- * tab, then emails both maintainers.
+ * Cloudflare Pages Function and writes them to the `RSVP_Responses` tab.
+ *
+ * Semantics:
+ *   - LIFF submission (has lineUserId): UPSERT — update the existing row for
+ *     this LINE userId in place, otherwise append. Result: one row per LINE
+ *     user, latest answer wins. A guest can revise mistakes without polluting
+ *     the Sheet.
+ *   - Fallback submission (no lineUserId): always append. Same name across
+ *     two devices is too unreliable to dedupe on; let the couple reconcile
+ *     fallback rows manually.
  *
  * Deploy:
  *   1. Open the Sheet → Extensions → Apps Script. Paste this whole file in.
- *   2. Set the constants below (SHEET_ID, NOTIFY_EMAILS).
- *   3. Deploy → New deployment → Type: Web app.
- *      - Description: "RSVP webhook v1"
- *      - Execute as: Me
- *      - Who has access: Anyone with the link
- *   4. Authorize when prompted. Copy the resulting /exec URL — that goes into
- *      Cloudflare Pages env var RSVP_WEBHOOK_URL.
- *
- * Rotating the secret = redeploy and paste the new URL into Cloudflare.
+ *   2. Set SHEET_ID below if it isn't already.
+ *   3. Deploy:
+ *      - First time: Deploy → New deployment → Type: Web app
+ *        - Execute as: Me
+ *        - Who has access: Anyone with the link
+ *      - Updating an existing deployment (so the /exec URL stays stable):
+ *        Deploy → Manage deployments → ✏️ Edit → Version: New version → Deploy
+ *   4. Copy the /exec URL → Cloudflare Pages env var RSVP_WEBHOOK_URL.
  */
 
 // ── CONFIG ───────────────────────────────────────────────────────────────
 const SHEET_ID = '1EO3CIi1U5hwLpmux--DFeJ7Fe8OPMAsMeeIBf8CrHic';  // the wedding-planning Sheet
 const TAB_NAME = 'RSVP_Responses';
-const NOTIFY_EMAILS = [
-  // both maintainers, per references/context.md
-  'zacharyzhuoyc@gmail.com',
-  '34reiko56@gmail.com'
-];
 // ─────────────────────────────────────────────────────────────────────────
 
 const HEADERS = [
@@ -34,12 +36,13 @@ const HEADERS = [
   'side', 'relationship', 'attending',
   'headcount', 'child_count', 'diet', 'message',
 ];
+const COL_LINE_USER_ID = 3;  // 1-indexed column position in the Sheet
 
 function doPost(e) {
   try {
     const body = JSON.parse(e.postData.contents);
     const sheet = getOrCreateTab_();
-    sheet.appendRow([
+    const row = [
       body.submittedAt || new Date().toISOString(),
       body.source || '',
       body.lineUserId || '',
@@ -51,13 +54,22 @@ function doPost(e) {
       body.childCount ?? '',
       body.diet || '',
       body.message || '',
-    ]);
-    notify_(body);
-    return ContentService.createTextOutput(JSON.stringify({ ok: true }))
-      .setMimeType(ContentService.MimeType.JSON);
+    ];
+
+    const existingRow = body.lineUserId
+      ? findRowByUserId_(sheet, body.lineUserId)
+      : -1;
+
+    if (existingRow > 0) {
+      // Update in place — latest answer wins for this LINE user.
+      sheet.getRange(existingRow, 1, 1, row.length).setValues([row]);
+    } else {
+      sheet.appendRow(row);
+    }
+
+    return jsonOk_({ ok: true, mode: existingRow > 0 ? 'updated' : 'appended' });
   } catch (err) {
-    return ContentService.createTextOutput(JSON.stringify({ ok: false, error: String(err) }))
-      .setMimeType(ContentService.MimeType.JSON);
+    return jsonOk_({ ok: false, error: String(err) });
   }
 }
 
@@ -72,22 +84,19 @@ function getOrCreateTab_() {
   return sheet;
 }
 
-function notify_(body) {
-  const subject = `[Wedding RSVP] ${body.name} · ${body.attending}`;
-  const lines = [
-    `姓名：${body.name}`,
-    `來源：${body.source}`,
-    `賓客方：${body.side}`,
-    `關係：${body.relationship}`,
-    `是否出席：${body.attending}`,
-    `出席人數：${body.headcount}（兒童 ${body.childCount}）`,
-    `飲食需求：${body.diet || '—'}`,
-    `留言：${body.message || '—'}`,
-    `LINE userId：${body.lineUserId || '—'}`,
-  ];
-  MailApp.sendEmail({
-    to: NOTIFY_EMAILS.join(','),
-    subject: subject,
-    body: lines.join('\n'),
-  });
+function findRowByUserId_(sheet, userId) {
+  if (!userId) return -1;
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return -1;
+  // Read only the line_user_id column to keep this cheap even at 200+ rows.
+  const values = sheet.getRange(2, COL_LINE_USER_ID, lastRow - 1, 1).getValues();
+  for (let i = 0; i < values.length; i++) {
+    if (values[i][0] === userId) return i + 2;  // +2 = skip header + 0-index→1-index
+  }
+  return -1;
+}
+
+function jsonOk_(obj) {
+  return ContentService.createTextOutput(JSON.stringify(obj))
+    .setMimeType(ContentService.MimeType.JSON);
 }

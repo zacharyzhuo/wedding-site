@@ -16,9 +16,19 @@ type FormState = {
   message: string
 }
 
+// Fixed vocabulary so the value lands in the Sheet as a stable label;
+// avoids free-text variants like "全素"/"純素"/"vegan" that mean the same thing.
+const DIET_OPTIONS = [
+  '無特殊需求',
+  '全素',
+  '蛋奶素',
+  '食物過敏（請於留言備註）',
+  '其他（請於留言備註）',
+] as const
+
 const initial: FormState = {
   side: '', relationship: '', attending: '',
-  headcount: '1', childCount: '0', diet: '', message: '',
+  headcount: '1', childCount: '0', diet: '無特殊需求', message: '',
 }
 
 export default function RsvpLiffPage() {
@@ -124,11 +134,11 @@ export default function RsvpLiffPage() {
                 onChange={e => setForm({ ...form, childCount: e.target.value })}
               />
             </Field>
-            <Field label="飲食需求（素食、過敏等）">
-              <input
-                type="text" className="field-input"
+            <Field label="飲食需求">
+              <Select
                 value={form.diet}
-                onChange={e => setForm({ ...form, diet: e.target.value })}
+                onChange={v => setForm({ ...form, diet: v })}
+                options={[...DIET_OPTIONS]}
               />
             </Field>
           </>

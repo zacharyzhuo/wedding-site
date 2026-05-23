@@ -7,10 +7,19 @@
 
 import { useState } from 'react'
 
+// Same fixed set as the LIFF form, see comment in /liff/rsvp/page.tsx
+const DIET_OPTIONS = [
+  '無特殊需求',
+  '全素',
+  '蛋奶素',
+  '食物過敏（請於留言備註）',
+  '其他（請於留言備註）',
+] as const
+
 export default function RsvpFallbackPage() {
   const [form, setForm] = useState({
     name: '', side: '', relationship: '', attending: '',
-    headcount: '1', childCount: '0', diet: '', message: '',
+    headcount: '1', childCount: '0', diet: '無特殊需求', message: '',
   })
   const [submitting, setSubmitting] = useState(false)
   const [done, setDone] = useState(false)
@@ -83,8 +92,8 @@ export default function RsvpFallbackPage() {
                 value={form.childCount} onChange={e => setForm({ ...form, childCount: e.target.value })} />
             </Labeled>
             <Labeled label="飲食需求">
-              <input type="text" className="field-input"
-                value={form.diet} onChange={e => setForm({ ...form, diet: e.target.value })} />
+              <Select value={form.diet} onChange={v => setForm({ ...form, diet: v })}
+                options={[...DIET_OPTIONS]} />
             </Labeled>
           </>
         )}

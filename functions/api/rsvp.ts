@@ -29,6 +29,17 @@ interface RsvpBody {
 
 const ALLOWED = new Set(['男方', '女方', '家長', '親戚', '朋友', '出席', '不克出席'])
 
+// Diet is a fixed dropdown on the form. Empty string is also accepted so
+// fallback/older submissions don't 400. Anything outside this set is rejected.
+const ALLOWED_DIET = new Set([
+  '',
+  '無特殊需求',
+  '全素',
+  '蛋奶素',
+  '食物過敏（請於留言備註）',
+  '其他（請於留言備註）',
+])
+
 function isValid(b: Partial<RsvpBody>): b is RsvpBody {
   if (!b || typeof b !== 'object') return false
   if (!b.name || typeof b.name !== 'string') return false
@@ -36,6 +47,7 @@ function isValid(b: Partial<RsvpBody>): b is RsvpBody {
   if (!ALLOWED.has(String(b.relationship))) return false
   if (!ALLOWED.has(String(b.attending))) return false
   if (typeof b.headcount !== 'number' || b.headcount < 0 || b.headcount > 50) return false
+  if (b.diet !== undefined && !ALLOWED_DIET.has(String(b.diet))) return false
   return true
 }
 
