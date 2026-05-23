@@ -1,0 +1,27 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html { color-scheme: light; }
+  body {
+    @apply bg-cream text-ink font-sans antialiased;
+  }
+  h1, h2, h3 { @apply font-serif tracking-wide; }
+}
+
+/* Buttons — neutral primary, used by both the OA-add CTA and form submit. */
+@layer components {
+  .btn-primary {
+    @apply inline-flex items-center justify-center rounded-full
+           bg-ink text-cream px-8 py-3 text-base font-medium
+           transition hover:opacity-90 active:opacity-80
+           disabled:opacity-40 disabled:cursor-not-allowed;
+  }
+  .field-label { @apply block text-sm text-ink/70 mb-1; }
+  .field-input {
+    @apply w-full rounded-md border border-champagne bg-white
+           px-4 py-3 text-base focus:outline-none focus:ring-2
+           focus:ring-accent/40 focus:border-accent;
+  }
+}

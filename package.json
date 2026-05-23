@@ -1,0 +1,30 @@
+{
+  "name": "wedding-site",
+  "version": "0.1.0",
+  "private": true,
+  "description": "卓育辰 ＆ 楊皖淩 · 2027-06-05 · LINE-central wedding site on Cloudflare Pages",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "pages:dev": "npm run build && npx wrangler pages dev .next/static --compatibility-date=2026-05-01",
+    "pages:deploy": "npm run build && npx wrangler pages deploy out --project-name=wedding-site"
+  },
+  "dependencies": {
+    "@line/liff": "^2.26.0",
+    "next": "^15.1.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "autoprefixer": "^10.4.20",
+    "postcss": "^8.4.49",
+    "tailwindcss": "^3.4.17",
+    "typescript": "^5.7.2",
+    "wrangler": "^3.95.0"
+  }
+}

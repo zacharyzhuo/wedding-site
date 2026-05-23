@@ -1,0 +1,9 @@
+{
+  "$schema": "https://json.schemastore.org/wrangler.json",
+  "name": "wedding-site",
+  "pages_build_output_dir": "./out",
+  "compatibility_date": "2026-05-01",
+  "compatibility_flags": ["nodejs_compat"]
+  // Env vars are configured in Cloudflare Pages dashboard
+  // (Settings > Environment variables), not here, so secrets stay out of git.
+}
