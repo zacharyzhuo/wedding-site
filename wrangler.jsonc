@@ -3,7 +3,31 @@
   "name": "wedding-site",
   "pages_build_output_dir": "./out",
   "compatibility_date": "2026-05-01",
-  "compatibility_flags": ["nodejs_compat"]
-  // Env vars are configured in Cloudflare Pages dashboard
-  // (Settings > Environment variables), not here, so secrets stay out of git.
+  "compatibility_flags": ["nodejs_compat"],
+
+  // D1 — live store for danmaku + photos metadata + settings.
+  // Provision: `npx wrangler d1 create wedding-live` (run once);
+  // paste the returned database_id below and into the Pages dashboard binding.
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "wedding-live",
+      "database_id": "REPLACE_ME_AFTER_WRANGLER_D1_CREATE",
+      "migrations_dir": "migrations"
+    }
+  ],
+
+  // R2 — photo binaries. Provision: `npx wrangler r2 bucket create wedding-photos`.
+  // The Pages Function binding is just the bucket reference; presigned URLs
+  // are generated via the R2 S3 endpoint (R2_ACCOUNT_ID + R2_ACCESS_KEY_ID +
+  // R2_SECRET_ACCESS_KEY env vars, configured in dashboard).
+  "r2_buckets": [
+    {
+      "binding": "PHOTOS",
+      "bucket_name": "wedding-photos"
+    }
+  ]
+
+  // Non-secret env vars + all secrets live in the Cloudflare Pages dashboard
+  // (Settings > Environment variables), not here — keeps secrets out of git.
 }

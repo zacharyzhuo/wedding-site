@@ -1,0 +1,245 @@
+'use client'
+
+// LIFF: 管理介面 (Zachary + Angelet only)
+// Three jobs:
+//   1. Live feed of danmaku + photos with delete / hide buttons.
+//   2. Toggle between auto-approve and manual moderation mode.
+//   3. Promote pending messages (keyword filter hits) to approved.
+//
+// Auth gate runs in /api/admin/check on first load. The page itself is just
+// served statically — without an admin idToken every API call returns 403,
+// so non-admins see "未授權".
+
+import { useCallback, useEffect, useState } from 'react'
+import { useLiffProfile } from '@/lib/liff'
+import { getLiffIdToken } from '@/lib/liff-token'
+
+type DanmakuItem = {
+  id: number
+  displayName: string
+  message: string
+  photoId: number | null
+  status: 'approved' | 'pending' | 'deleted'
+  createdAt: number
+}
+type PhotoItem = {
+  id: number
+  url: string
+  uploaderName: string
+  caption: string | null
+  status: 'visible' | 'hidden'
+  createdAt: number
+}
+
+const POLL_MS = 5000
+
+export default function AdminLiffPage() {
+  const liffId = process.env.NEXT_PUBLIC_LIFF_ID_ADMIN
+  const state = useLiffProfile(liffId)
+  const [authState, setAuthState] = useState<'loading' | 'ok' | 'forbidden' | 'error'>('loading')
+  const [authMessage, setAuthMessage] = useState<string | null>(null)
+  const [mode, setMode] = useState<'auto' | 'manual'>('auto')
+  const [danmaku, setDanmaku] = useState<DanmakuItem[]>([])
+  const [photos, setPhotos] = useState<PhotoItem[]>([])
+  const [filter, setFilter] = useState<'all' | 'pending'>('all')
+
+  const authedFetch = useCallback(async (path: string, init?: RequestInit) => {
+    const idToken = await getLiffIdToken()
+    if (!idToken) throw new Error('idToken missing')
+    return fetch(path, {
+      ...init,
+      headers: {
+        ...(init?.headers ?? {}),
+        'x-line-id-token': idToken,
+        'content-type': 'application/json',
+      },
+    })
+  }, [])
+
+  const refresh = useCallback(async () => {
+    try {
+      const res = await authedFetch('/api/admin/feed')
+      if (res.status === 403) { setAuthState('forbidden'); return }
+      if (!res.ok) { setAuthState('error'); setAuthMessage(`HTTP ${res.status}`); return }
+      const data = await res.json() as {
+        ok: boolean; mode: 'auto' | 'manual'
+        danmaku: DanmakuItem[]; photos: PhotoItem[]
+      }
+      setMode(data.mode)
+      setDanmaku(data.danmaku)
+      setPhotos(data.photos)
+      setAuthState('ok')
+    } catch (e) {
+      setAuthState('error')
+      setAuthMessage(e instanceof Error ? e.message : 'unknown')
+    }
+  }, [authedFetch])
+
+  // Initial auth + first feed pull.
+  useEffect(() => {
+    if (state.status !== 'ready') return
+    ;(async () => {
+      try {
+        const res = await authedFetch('/api/admin/check')
+        if (res.status === 403) { setAuthState('forbidden'); return }
+        if (!res.ok) { setAuthState('error'); setAuthMessage(`HTTP ${res.status}`); return }
+        await refresh()
+      } catch (e) {
+        setAuthState('error')
+        setAuthMessage(e instanceof Error ? e.message : 'unknown')
+      }
+    })()
+  }, [state.status, authedFetch, refresh])
+
+  // Live polling once authed.
+  useEffect(() => {
+    if (authState !== 'ok') return
+    const t = setInterval(() => { refresh() }, POLL_MS)
+    return () => clearInterval(t)
+  }, [authState, refresh])
+
+  async function setDanmakuStatus(id: number, action: 'delete' | 'approve') {
+    const res = await authedFetch(`/api/admin/danmaku/${id}`, {
+      method: 'POST', body: JSON.stringify({ action }),
+    })
+    if (res.ok) refresh()
+  }
+  async function setPhotoStatus(id: number, action: 'hide' | 'unhide') {
+    const res = await authedFetch(`/api/admin/photos/${id}`, {
+      method: 'POST', body: JSON.stringify({ action }),
+    })
+    if (res.ok) refresh()
+  }
+  async function toggleMode() {
+    const next = mode === 'auto' ? 'manual' : 'auto'
+    const res = await authedFetch('/api/admin/mode', {
+      method: 'POST', body: JSON.stringify({ mode: next }),
+    })
+    if (res.ok) setMode(next)
+  }
+
+  if (state.status === 'loading' || authState === 'loading') {
+    return <Centered><p className="text-ink/60">驗證中…</p></Centered>
+  }
+  if (state.status === 'error') {
+    return <Centered>
+      <p className="text-ink/80">LINE 載入失敗</p>
+      <p className="text-sm text-ink/50 mt-2">{state.message}</p>
+    </Centered>
+  }
+  if (authState === 'forbidden') {
+    return <Centered>
+      <p className="text-ink/80">未授權</p>
+      <p className="text-sm text-ink/50 mt-2">此頁面只開放給新人。</p>
+      <p className="text-xs text-ink/40 mt-4">
+        如果你是 Zachary 或 Angelet，請把你的 LINE userId 加進 ADMIN_LINE_USER_IDS。
+      </p>
+    </Centered>
+  }
+  if (authState === 'error') {
+    return <Centered>
+      <p className="text-ink/80">載入失敗</p>
+      <p className="text-sm text-ink/50 mt-2">{authMessage ?? 'unknown'}</p>
+    </Centered>
+  }
+
+  const visible = filter === 'pending'
+    ? danmaku.filter(d => d.status === 'pending')
+    : danmaku
+
+  return (
+    <main className="mx-auto max-w-2xl px-4 py-6">
+      <header className="flex items-center justify-between mb-6">
+        <h1 className="text-xl font-serif">即時審核</h1>
+        <button
+          className={`rounded-full px-4 py-1 text-sm font-medium ${
+            mode === 'auto' ? 'bg-accent text-cream' : 'bg-red-600 text-cream'
+          }`}
+          onClick={toggleMode}
+        >
+          {mode === 'auto' ? 'AUTO' : 'MANUAL'}
+        </button>
+      </header>
+
+      <div className="mb-4 flex gap-2 text-sm">
+        <button
+          className={`rounded-full px-3 py-1 ${filter === 'all' ? 'bg-ink text-cream' : 'bg-white border border-champagne'}`}
+          onClick={() => setFilter('all')}
+        >全部</button>
+        <button
+          className={`rounded-full px-3 py-1 ${filter === 'pending' ? 'bg-ink text-cream' : 'bg-white border border-champagne'}`}
+          onClick={() => setFilter('pending')}
+        >待審 ({danmaku.filter(d => d.status === 'pending').length})</button>
+      </div>
+
+      <section className="mb-8">
+        <h2 className="mb-2 text-sm uppercase tracking-widest text-accent">彈幕</h2>
+        <ul className="space-y-2">
+          {visible.length === 0 && <li className="text-sm text-ink/50">沒有訊息。</li>}
+          {visible.map(d => (
+            <li key={d.id} className={`rounded-md border bg-white p-3 ${
+              d.status === 'pending' ? 'border-amber-400' :
+              d.status === 'deleted' ? 'border-champagne opacity-40' :
+              'border-champagne'
+            }`}>
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-sm">{d.message}</p>
+                  <p className="mt-1 text-xs text-ink/50">
+                    {d.displayName} · {new Date(d.createdAt).toLocaleTimeString('zh-TW', { hour12: false })}
+                    {d.photoId && ' · 附照片'}
+                  </p>
+                </div>
+                <div className="flex shrink-0 gap-1">
+                  {d.status === 'pending' && (
+                    <button
+                      className="rounded bg-emerald-600 px-2 py-1 text-xs text-cream"
+                      onClick={() => setDanmakuStatus(d.id, 'approve')}
+                    >通過</button>
+                  )}
+                  {d.status !== 'deleted' && (
+                    <button
+                      className="rounded bg-red-600 px-2 py-1 text-xs text-cream"
+                      onClick={() => setDanmakuStatus(d.id, 'delete')}
+                    >刪除</button>
+                  )}
+                </div>
+              </div>
+            </li>
+          ))}
+        </ul>
+      </section>
+
+      <section>
+        <h2 className="mb-2 text-sm uppercase tracking-widest text-accent">照片</h2>
+        <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+          {photos.length === 0 && <li className="text-sm text-ink/50">沒有照片。</li>}
+          {photos.map(p => (
+            <li key={p.id} className={`overflow-hidden rounded-md border bg-white ${
+              p.status === 'hidden' ? 'border-red-400 opacity-50' : 'border-champagne'
+            }`}>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={p.url} alt="" className="aspect-square w-full object-cover" />
+              <div className="p-2">
+                <p className="truncate text-xs text-ink/60">{p.uploaderName}</p>
+                {p.caption && <p className="truncate text-xs text-ink/40">{p.caption}</p>}
+                <button
+                  className={`mt-2 w-full rounded px-2 py-1 text-xs ${
+                    p.status === 'hidden' ? 'bg-emerald-600 text-cream' : 'bg-red-600 text-cream'
+                  }`}
+                  onClick={() => setPhotoStatus(p.id, p.status === 'hidden' ? 'unhide' : 'hide')}
+                >
+                  {p.status === 'hidden' ? '取消隱藏' : '隱藏'}
+                </button>
+              </div>
+            </li>
+          ))}
+        </ul>
+      </section>
+    </main>
+  )
+}
+
+function Centered({ children }: { children: React.ReactNode }) {
+  return <main className="mx-auto max-w-md px-6 py-20 text-center">{children}</main>
+}

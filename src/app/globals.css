@@ -10,6 +10,42 @@
   h1, h2, h3 { @apply font-serif tracking-wide; }
 }
 
+/* Danmaku — single right→left flight, 8 s. Each row sets --row-y inline. */
+@keyframes danmaku-fly {
+  from { transform: translateX(100vw); }
+  to   { transform: translateX(-110%); }
+}
+.danmaku-item {
+  position: absolute;
+  top: var(--row-y, 4rem);
+  right: 0;
+  white-space: nowrap;
+  font-family: var(--font-serif, "Noto Serif TC"), serif;
+  font-size: 2.25rem;
+  color: #faf7f1;
+  text-shadow: 0 2px 8px rgba(0,0,0,0.55);
+  padding: 0.25rem 1rem;
+  animation: danmaku-fly 8s linear forwards;
+  will-change: transform;
+}
+.danmaku-item .name {
+  font-size: 1.25rem;
+  opacity: 0.8;
+  margin-left: 0.75rem;
+}
+
+/* Carousel — cross-fade between background photos. */
+.carousel-slide {
+  position: absolute;
+  inset: 0;
+  background-position: center;
+  background-size: cover;
+  background-color: #1f1c1a;
+  opacity: 0;
+  transition: opacity 800ms ease-in-out;
+}
+.carousel-slide.active { opacity: 1; }
+
 /* Buttons — neutral primary, used by both the OA-add CTA and form submit. */
 @layer components {
   .btn-primary {
