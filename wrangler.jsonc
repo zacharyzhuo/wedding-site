@@ -12,7 +12,7 @@
     {
       "binding": "DB",
       "database_name": "wedding-live",
-      "database_id": "REPLACE_ME_AFTER_WRANGLER_D1_CREATE",
+      "database_id": "735e2036-9658-4a24-bc64-0bb8d9b55ace",
       "migrations_dir": "migrations"
     }
   ],
