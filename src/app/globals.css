@@ -10,10 +10,13 @@
   h1, h2, h3 { @apply font-serif tracking-wide; }
 }
 
-/* Danmaku — single right→left flight, 14 s. Each row sets --row-y inline. */
+/* Danmaku — single right→left flight, 14 s. Each row sets --row-y inline.
+   The item is right-aligned (right: 0), so entering from off-right needs
+   +100% of its OWN width, and exiting fully left needs -100vw. Percentages
+   in translateX are element-relative — a -N% end point stalls mid-screen. */
 @keyframes danmaku-fly {
-  from { transform: translateX(100vw); }
-  to   { transform: translateX(-110%); }
+  from { transform: translateX(100%); }
+  to   { transform: translateX(-100vw); }
 }
 .danmaku-item {
   position: absolute;
