@@ -30,7 +30,7 @@ type PhotoItem = {
 const POLL_BASE_MS = 3000
 const POLL_JITTER_MS = 500
 const CAROUSEL_INTERVAL_MS = 6000
-const DANMAKU_LIFETIME_MS = 8500 // matches CSS animation + a small safety margin
+const DANMAKU_LIFETIME_MS = 14500 // matches CSS animation + a small safety margin
 const DANMAKU_ROW_COUNT = 4
 const PHOTO_RING_CAP = 30
 

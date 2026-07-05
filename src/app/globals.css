@@ -10,7 +10,7 @@
   h1, h2, h3 { @apply font-serif tracking-wide; }
 }
 
-/* Danmaku — single right→left flight, 8 s. Each row sets --row-y inline. */
+/* Danmaku — single right→left flight, 14 s. Each row sets --row-y inline. */
 @keyframes danmaku-fly {
   from { transform: translateX(100vw); }
   to   { transform: translateX(-110%); }
@@ -25,7 +25,7 @@
   color: #faf7f1;
   text-shadow: 0 2px 8px rgba(0,0,0,0.55);
   padding: 0.25rem 1rem;
-  animation: danmaku-fly 8s linear forwards;
+  animation: danmaku-fly 14s linear forwards;
   will-change: transform;
 }
 .danmaku-item .name {
