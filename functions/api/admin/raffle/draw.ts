@@ -1,10 +1,11 @@
-// POST /api/admin/raffle/draw  with body { prize }
+// POST /api/admin/raffle/draw  with body { prizeId }
 //
-// Picks a winner server-side with crypto randomness. Eligibility: every
-// entrant not currently holding an ACTIVE win — one person can hold at most
-// one prize, but a forfeited (absent) winner stays eligible for later draws.
-// The inserted row is the audit record; the screen picks it up on its next
-// feed poll and plays the reveal animation.
+// Draws one winner for a pre-defined prize (raffle_prizes). Refuses when the
+// prize has no remaining stock (quantity minus ACTIVE wins). Winner picked
+// server-side with crypto randomness. Eligibility: entrants not currently
+// holding an ACTIVE win — at most one prize per person, but a forfeited
+// (absent) winner stays eligible for later draws. The inserted row is the
+// audit record; the screen picks it up on its next feed poll.
 
 import { err, ok, readJson } from '../../../_lib/http'
 import { LiffAuthError } from '../../../_lib/liff-verify'
@@ -16,9 +17,7 @@ interface Env {
   ADMIN_LINE_USER_IDS?: string
 }
 
-interface Body { prize?: unknown }
-
-const MAX_PRIZE_LEN = 40
+interface Body { prizeId?: unknown }
 
 export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
   try {
@@ -29,9 +28,20 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
   }
 
   const body = await readJson<Body>(request)
-  const prize = typeof body?.prize === 'string' ? body.prize.trim() : ''
-  if (!prize) return err(400, 'prize required')
-  if (prize.length > MAX_PRIZE_LEN) return err(400, `prize too long (max ${MAX_PRIZE_LEN})`)
+  const prizeId = Number(body?.prizeId)
+  if (!Number.isInteger(prizeId) || prizeId <= 0) return err(400, 'prizeId required')
+
+  const prize = await env.DB
+    .prepare(
+      `SELECT p.id, p.name, p.quantity,
+              (SELECT COUNT(*) FROM raffle_draws d
+                WHERE d.prize_id = p.id AND d.status = 'active') AS won
+       FROM raffle_prizes p WHERE p.id = ?`
+    )
+    .bind(prizeId)
+    .first<{ id: number; name: string; quantity: number; won: number }>()
+  if (!prize) return err(404, 'prize not found')
+  if (prize.won >= prize.quantity) return err(400, `「${prize.name}」已抽完`)
 
   const eligibleRes = await env.DB
     .prepare(
@@ -52,16 +62,17 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
   const now = Date.now()
   const res = await env.DB
     .prepare(
-      `INSERT INTO raffle_draws (prize, winner_id, winner_name, status, drawn_at)
-       VALUES (?, ?, ?, 'active', ?)`
+      `INSERT INTO raffle_draws (prize, prize_id, winner_id, winner_name, status, drawn_at)
+       VALUES (?, ?, ?, ?, 'active', ?)`
     )
-    .bind(prize, winner.line_user_id, winner.display_name, now)
+    .bind(prize.name, prize.id, winner.line_user_id, winner.display_name, now)
     .run()
 
   return ok({
     draw: {
       id: res.meta.last_row_id,
-      prize,
+      prize: prize.name,
+      prizeId: prize.id,
       winnerName: winner.display_name,
       status: 'active',
       drawnAt: now,

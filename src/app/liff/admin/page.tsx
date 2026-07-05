@@ -33,9 +33,16 @@ type PhotoItem = {
 type RaffleDraw = {
   id: number
   prize: string
+  prizeId: number | null
   winnerName: string
   status: 'active' | 'forfeited'
   drawnAt: number
+}
+type RafflePrize = {
+  id: number
+  name: string
+  quantity: number
+  remaining: number
 }
 
 const POLL_MS = 5000
@@ -49,9 +56,13 @@ export default function AdminLiffPage() {
   const [danmaku, setDanmaku] = useState<DanmakuItem[]>([])
   const [photos, setPhotos] = useState<PhotoItem[]>([])
   const [filter, setFilter] = useState<'all' | 'pending'>('all')
+  const [tab, setTab] = useState<'danmaku' | 'photos' | 'raffle'>('danmaku')
   const [raffleTotal, setRaffleTotal] = useState(0)
+  const [raffleMode, setRaffleMode] = useState<'on' | 'off'>('off')
+  const [prizes, setPrizes] = useState<RafflePrize[]>([])
   const [draws, setDraws] = useState<RaffleDraw[]>([])
-  const [prizeInput, setPrizeInput] = useState('')
+  const [newPrizeName, setNewPrizeName] = useState('')
+  const [newPrizeQty, setNewPrizeQty] = useState('1')
   const [drawing, setDrawing] = useState(false)
   const [raffleError, setRaffleError] = useState<string | null>(null)
 
@@ -86,8 +97,16 @@ export default function AdminLiffPage() {
       try {
         const r = await authedFetch('/api/admin/raffle')
         if (r.ok) {
-          const rd = await r.json() as { ok: boolean; total: number; draws: RaffleDraw[] }
-          if (rd.ok) { setRaffleTotal(rd.total); setDraws(rd.draws) }
+          const rd = await r.json() as {
+            ok: boolean; mode: 'on' | 'off'; total: number
+            prizes: RafflePrize[]; draws: RaffleDraw[]
+          }
+          if (rd.ok) {
+            setRaffleMode(rd.mode)
+            setRaffleTotal(rd.total)
+            setPrizes(rd.prizes)
+            setDraws(rd.draws)
+          }
         }
       } catch { /* next poll retries */ }
     } catch (e) {
@@ -141,19 +160,18 @@ export default function AdminLiffPage() {
     }).catch(() => null)
     if (!res || !res.ok) setPhotos(before)
   }
-  async function doDraw(prize: string) {
-    const trimmed = prize.trim()
-    if (!trimmed || drawing) return
+  async function doDraw(prizeId: number) {
+    if (drawing) return
     setDrawing(true)
     setRaffleError(null)
     try {
       const res = await authedFetch('/api/admin/raffle/draw', {
-        method: 'POST', body: JSON.stringify({ prize: trimmed }),
+        method: 'POST', body: JSON.stringify({ prizeId }),
       })
       const data = await res.json() as { ok?: boolean; draw?: RaffleDraw; error?: string }
       if (!res.ok || !data.ok || !data.draw) throw new Error(data.error ?? `HTTP ${res.status}`)
       setDraws(ds => [data.draw!, ...ds])
-      setPrizeInput('')
+      setPrizes(ps => ps.map(p => (p.id === prizeId ? { ...p, remaining: Math.max(0, p.remaining - 1) } : p)))
     } catch (e) {
       setRaffleError(e instanceof Error ? e.message : '開抽失敗')
     } finally {
@@ -163,7 +181,7 @@ export default function AdminLiffPage() {
 
   // 重抽 = forfeit the absent winner, then immediately draw the same prize.
   async function redraw(d: RaffleDraw) {
-    if (drawing) return
+    if (drawing || d.prizeId === null) return
     setDrawing(true)
     setRaffleError(null)
     try {
@@ -173,7 +191,7 @@ export default function AdminLiffPage() {
       if (!f.ok) throw new Error(`forfeit HTTP ${f.status}`)
       setDraws(ds => ds.map(x => (x.id === d.id ? { ...x, status: 'forfeited' as const } : x)))
       const res = await authedFetch('/api/admin/raffle/draw', {
-        method: 'POST', body: JSON.stringify({ prize: d.prize }),
+        method: 'POST', body: JSON.stringify({ prizeId: d.prizeId }),
       })
       const data = await res.json() as { ok?: boolean; draw?: RaffleDraw; error?: string }
       if (!res.ok || !data.ok || !data.draw) throw new Error(data.error ?? `HTTP ${res.status}`)
@@ -183,6 +201,42 @@ export default function AdminLiffPage() {
     } finally {
       setDrawing(false)
     }
+  }
+
+  async function toggleRaffleMode() {
+    const prev = raffleMode
+    const next = prev === 'on' ? 'off' : 'on'
+    setRaffleMode(next)
+    const res = await authedFetch('/api/admin/raffle/mode', {
+      method: 'POST', body: JSON.stringify({ mode: next }),
+    }).catch(() => null)
+    if (!res || !res.ok) setRaffleMode(prev)
+  }
+
+  async function addPrize() {
+    const name = newPrizeName.trim()
+    const quantity = Number(newPrizeQty)
+    if (!name || !Number.isInteger(quantity) || quantity < 1) return
+    setRaffleError(null)
+    try {
+      const res = await authedFetch('/api/admin/raffle/prizes', {
+        method: 'POST', body: JSON.stringify({ name, quantity }),
+      })
+      const data = await res.json() as { ok?: boolean; id?: number; error?: string }
+      if (!res.ok || !data.ok || !data.id) throw new Error(data.error ?? `HTTP ${res.status}`)
+      setPrizes(ps => [...ps, { id: data.id!, name, quantity, remaining: quantity }])
+      setNewPrizeName('')
+      setNewPrizeQty('1')
+    } catch (e) {
+      setRaffleError(e instanceof Error ? e.message : '新增獎項失敗')
+    }
+  }
+
+  async function removePrize(id: number) {
+    const before = prizes
+    setPrizes(ps => ps.filter(p => p.id !== id))
+    const res = await authedFetch(`/api/admin/raffle/prizes?id=${id}`, { method: 'DELETE' }).catch(() => null)
+    if (!res || !res.ok) setPrizes(before)
   }
 
   async function toggleMode() {
@@ -238,6 +292,22 @@ export default function AdminLiffPage() {
         </button>
       </header>
 
+      <nav className="mb-6 flex gap-2 border-b border-champagne pb-3 text-sm">
+        {([['danmaku', '彈幕'], ['photos', '照片'], ['raffle', '抽獎']] as const).map(([key, label]) => (
+          <button
+            key={key}
+            className={`rounded-full px-4 py-1 ${tab === key ? 'bg-ink text-cream' : 'bg-white border border-champagne'}`}
+            onClick={() => setTab(key)}
+          >
+            {label}
+            {key === 'danmaku' && danmaku.some(d => d.status === 'pending') && (
+              <span className="ml-1 text-amber-400">●</span>
+            )}
+          </button>
+        ))}
+      </nav>
+
+      {tab === 'danmaku' && (<>
       <div className="mb-4 flex gap-2 text-sm">
         <button
           className={`rounded-full px-3 py-1 ${filter === 'all' ? 'bg-ink text-cream' : 'bg-white border border-champagne'}`}
@@ -287,60 +357,116 @@ export default function AdminLiffPage() {
         </ul>
       </section>
 
-      <section className="mb-8">
-        <h2 className="mb-2 text-sm uppercase tracking-widest text-accent">
-          抽獎 <span className="normal-case tracking-normal text-ink/50">（{raffleTotal} 人參加）</span>
-        </h2>
-        <div className="flex gap-2">
-          <input
-            className="field-input flex-1"
-            placeholder="獎項名稱，例如：頭獎 iPhone"
-            value={prizeInput}
-            onChange={e => setPrizeInput(e.target.value)}
-            maxLength={40}
-          />
+      </>)}
+
+      {tab === 'raffle' && (
+      <section>
+        <div className="mb-5 flex items-center justify-between">
+          <p className="text-sm text-ink/60">{raffleTotal} 人參加</p>
           <button
-            className="btn-primary shrink-0 px-5"
-            disabled={drawing || !prizeInput.trim()}
-            onClick={() => doDraw(prizeInput)}
+            className={`rounded-full px-4 py-1 text-sm font-medium ${
+              raffleMode === 'on' ? 'bg-amber-600 text-cream' : 'bg-white border border-champagne text-ink/70'
+            }`}
+            onClick={toggleRaffleMode}
           >
-            {drawing ? '抽獎中…' : '開抽 🎲'}
+            {raffleMode === 'on' ? '⏸ 結束抽獎時間' : '▶ 開始抽獎時間'}
           </button>
         </div>
-        <p className="mt-1 text-xs text-ink/40">
-          按下開抽後 3 秒內，大螢幕會播放開獎動畫並公布得主。
+        <p className="-mt-3 mb-4 text-xs text-ink/40">
+          抽獎時間開啟時，大螢幕會顯示「抽獎時間」與獎項清單；開抽後 3 秒內播放開獎動畫。
         </p>
-        {raffleError && <p className="mt-2 text-sm text-red-600">{raffleError}</p>}
-        {draws.length > 0 && (
-          <ul className="mt-3 space-y-2">
-            {draws.map(d => (
-              <li key={d.id} className={`rounded-md border bg-white p-3 ${
-                d.status === 'forfeited' ? 'border-champagne opacity-40' : 'border-champagne'
-              }`}>
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <p className="text-sm">
-                      {d.prize} → <span className="font-medium">{d.winnerName}</span>
-                      {d.status === 'forfeited' && <span className="ml-2 text-xs text-red-600">已作廢</span>}
-                    </p>
-                    <p className="mt-1 text-xs text-ink/50">
-                      {new Date(d.drawnAt).toLocaleTimeString('zh-TW', { hour12: false })}
-                    </p>
-                  </div>
-                  {d.status === 'active' && (
+
+        <h2 className="mb-2 text-sm uppercase tracking-widest text-accent">獎項</h2>
+        <ul className="space-y-2">
+          {prizes.length === 0 && <li className="text-sm text-ink/50">尚無獎項。</li>}
+          {prizes.map(p => (
+            <li key={p.id} className={`rounded-md border border-champagne bg-white p-3 ${
+              p.remaining === 0 ? 'opacity-40' : ''
+            }`}>
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm font-medium">{p.name}</p>
+                  <p className="mt-1 text-xs text-ink/50">
+                    {p.remaining === 0 ? '已抽完' : `剩 ${p.remaining} / ${p.quantity}`}
+                  </p>
+                </div>
+                <div className="flex shrink-0 items-center gap-2">
+                  <button
+                    className="btn-primary px-4 py-1 text-sm"
+                    disabled={drawing || p.remaining === 0}
+                    onClick={() => doDraw(p.id)}
+                  >{drawing ? '抽獎中…' : '開抽 🎲'}</button>
+                  {p.remaining === p.quantity && (
                     <button
-                      className="shrink-0 rounded bg-amber-600 px-2 py-1 text-xs text-cream"
-                      disabled={drawing}
-                      onClick={() => redraw(d)}
-                    >人不在，重抽</button>
+                      className="text-xs text-ink/40 underline underline-offset-4"
+                      onClick={() => removePrize(p.id)}
+                    >刪除</button>
                   )}
                 </div>
-              </li>
-            ))}
-          </ul>
+              </div>
+            </li>
+          ))}
+        </ul>
+
+        <div className="mt-4 flex gap-2">
+          <input
+            className="field-input flex-1"
+            placeholder="新增獎項名稱"
+            value={newPrizeName}
+            onChange={e => setNewPrizeName(e.target.value)}
+            maxLength={40}
+          />
+          <input
+            className="field-input w-20"
+            type="number"
+            min={1}
+            value={newPrizeQty}
+            onChange={e => setNewPrizeQty(e.target.value)}
+          />
+          <button
+            className="shrink-0 rounded-md border border-champagne bg-white px-4 text-sm"
+            disabled={!newPrizeName.trim()}
+            onClick={addPrize}
+          >新增</button>
+        </div>
+
+        {raffleError && <p className="mt-3 text-sm text-red-600">{raffleError}</p>}
+
+        {draws.length > 0 && (
+          <>
+            <h2 className="mb-2 mt-8 text-sm uppercase tracking-widest text-accent">得獎紀錄</h2>
+            <ul className="space-y-2">
+              {draws.map(d => (
+                <li key={d.id} className={`rounded-md border bg-white p-3 ${
+                  d.status === 'forfeited' ? 'border-champagne opacity-40' : 'border-champagne'
+                }`}>
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-sm">
+                        {d.prize} → <span className="font-medium">{d.winnerName}</span>
+                        {d.status === 'forfeited' && <span className="ml-2 text-xs text-red-600">已作廢</span>}
+                      </p>
+                      <p className="mt-1 text-xs text-ink/50">
+                        {new Date(d.drawnAt).toLocaleTimeString('zh-TW', { hour12: false })}
+                      </p>
+                    </div>
+                    {d.status === 'active' && d.prizeId !== null && (
+                      <button
+                        className="shrink-0 rounded bg-amber-600 px-2 py-1 text-xs text-cream"
+                        disabled={drawing}
+                        onClick={() => redraw(d)}
+                      >人不在，重抽</button>
+                    )}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </>
         )}
       </section>
+      )}
 
+      {tab === 'photos' && (
       <section>
         <h2 className="mb-2 text-sm uppercase tracking-widest text-accent">照片</h2>
         <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3">
@@ -367,6 +493,7 @@ export default function AdminLiffPage() {
           ))}
         </ul>
       </section>
+      )}
     </main>
   )
 }

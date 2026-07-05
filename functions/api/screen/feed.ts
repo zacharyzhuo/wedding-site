@@ -148,34 +148,70 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
         .all<{ id: number }>()).results) ?? []).map(r => r.id)
     : []
 
-  // Latest ACTIVE draw so the screen can play the reveal when a new one
-  // appears (it tracks the last id it has seen). Entrant names ride along
-  // only when a draw exists — they feed the name-roll animation.
+  // Raffle state for the screen: `mode` drives the standby takeover
+  // (「抽獎時間」 + prize list between draws), the latest ACTIVE draw drives
+  // the reveal (screen tracks the last id it has seen), and entrant
+  // name+avatar samples feed the roll animation. Winner avatar is joined
+  // from raffle_entries at read time.
+  const raffleModeRow = await env.DB
+    .prepare(`SELECT value FROM settings WHERE key = 'raffle_mode'`)
+    .first<{ value: string }>()
+  const raffleMode = raffleModeRow?.value === 'on' ? 'on' : 'off'
+
   const latestDraw = await env.DB
     .prepare(
-      `SELECT id, prize, winner_name, drawn_at
-       FROM raffle_draws WHERE status = 'active'
-       ORDER BY id DESC LIMIT 1`
+      `SELECT d.id, d.prize, d.winner_name, d.drawn_at,
+              e.avatar_url AS winner_avatar
+       FROM raffle_draws d
+       LEFT JOIN raffle_entries e ON e.line_user_id = d.winner_id
+       WHERE d.status = 'active'
+       ORDER BY d.id DESC LIMIT 1`
     )
-    .first<{ id: number; prize: string; winner_name: string; drawn_at: number }>()
-  const raffleNames = latestDraw
+    .first<{ id: number; prize: string; winner_name: string; drawn_at: number; winner_avatar: string | null }>()
+
+  const entrants = (latestDraw || raffleMode === 'on')
     ? ((((await env.DB
-        .prepare(`SELECT display_name FROM raffle_entries ORDER BY RANDOM() LIMIT 40`)
-        .all<{ display_name: string }>()).results) ?? []).map(r => r.display_name))
+        .prepare(`SELECT display_name, avatar_url FROM raffle_entries ORDER BY RANDOM() LIMIT 40`)
+        .all<{ display_name: string; avatar_url: string | null }>()).results) ?? [])
+        .map(r => ({ name: r.display_name, avatar: r.avatar_url })))
     : []
+
+  const raffleStandby = raffleMode === 'on'
+    ? {
+        total: (await env.DB
+          .prepare(`SELECT COUNT(*) AS n FROM raffle_entries`)
+          .first<{ n: number }>())?.n ?? 0,
+        prizes: ((((await env.DB
+          .prepare(
+            `SELECT p.name, p.quantity,
+                    (SELECT COUNT(*) FROM raffle_draws d
+                      WHERE d.prize_id = p.id AND d.status = 'active') AS won
+             FROM raffle_prizes p ORDER BY p.sort_order, p.id`
+          )
+          .all<{ name: string; quantity: number; won: number }>()).results) ?? [])
+          .map(p => ({
+            name: p.name,
+            quantity: p.quantity,
+            remaining: Math.max(0, p.quantity - p.won),
+          }))),
+      }
+    : null
 
   return json(200, {
     ok: true, danmaku, photos, cursor, removedDanmaku, removedPhotos,
-    raffle: latestDraw
-      ? {
-          draw: {
+    raffle: {
+      mode: raffleMode,
+      standby: raffleStandby,
+      entrants,
+      draw: latestDraw
+        ? {
             id: latestDraw.id,
             prize: latestDraw.prize,
             winnerName: latestDraw.winner_name,
+            winnerAvatar: latestDraw.winner_avatar,
             drawnAt: latestDraw.drawn_at,
-          },
-          names: raffleNames,
-        }
-      : null,
+          }
+        : null,
+    },
   })
 }

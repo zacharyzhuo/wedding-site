@@ -76,21 +76,33 @@ export default function ScreenPage() {
   // screen restart mid-event doesn't replay an old reveal to the room.
   const lastDrawIdRef = useRef<number | null>(null)
   const raffleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const [raffleShow, setRaffleShow] = useState<null | { prize: string; winnerName: string }>(null)
+  const [raffleMode, setRaffleMode] = useState<'on' | 'off'>('off')
+  const [raffleStandby, setRaffleStandby] = useState<null | {
+    total: number
+    prizes: Array<{ name: string; quantity: number; remaining: number }>
+  }>(null)
+  const [raffleShow, setRaffleShow] = useState<null | {
+    prize: string; winnerName: string; winnerAvatar: string | null
+  }>(null)
   const [raffleStage, setRaffleStage] = useState<'rolling' | 'reveal'>('rolling')
-  const [rollingName, setRollingName] = useState('')
+  const [rolling, setRolling] = useState<{ name: string; avatar: string | null }>({ name: '', avatar: null })
   useEffect(() => () => { if (raffleTimerRef.current) clearTimeout(raffleTimerRef.current) }, [])
 
-  const startRaffleReveal = useCallback((draw: { prize: string; winnerName: string }, names: string[]) => {
+  const startRaffleReveal = useCallback((
+    draw: { prize: string; winnerName: string; winnerAvatar: string | null },
+    entrants: Array<{ name: string; avatar: string | null }>,
+  ) => {
     if (raffleTimerRef.current) clearTimeout(raffleTimerRef.current)
-    const pool = names.length > 0 ? names : [draw.winnerName]
-    setRaffleShow({ prize: draw.prize, winnerName: draw.winnerName })
+    const pool = entrants.length > 0
+      ? entrants
+      : [{ name: draw.winnerName, avatar: draw.winnerAvatar }]
+    setRaffleShow({ prize: draw.prize, winnerName: draw.winnerName, winnerAvatar: draw.winnerAvatar })
     setRaffleStage('rolling')
-    // Name-roll that decelerates like a slot machine, then the reveal holds
-    // for 10 s before the screen returns to the carousel.
+    // Avatar+name roll that decelerates like a slot machine, then the reveal
+    // holds for 10 s before the screen falls back to standby / carousel.
     let delay = 70
     const spin = () => {
-      setRollingName(pool[Math.floor(Math.random() * pool.length)])
+      setRolling(pool[Math.floor(Math.random() * pool.length)])
       delay *= 1.13
       if (delay < 420) {
         raffleTimerRef.current = setTimeout(spin, delay)
@@ -198,8 +210,16 @@ export default function ScreenPage() {
             ok: boolean; danmaku: DanmakuItem[]; photos: PhotoItem[]; cursor: number
             removedDanmaku?: number[]; removedPhotos?: number[]
             raffle?: {
-              draw: { id: number; prize: string; winnerName: string; drawnAt: number }
-              names: string[]
+              mode: 'on' | 'off'
+              standby: {
+                total: number
+                prizes: Array<{ name: string; quantity: number; remaining: number }>
+              } | null
+              entrants: Array<{ name: string; avatar: string | null }>
+              draw: {
+                id: number; prize: string; winnerName: string
+                winnerAvatar: string | null; drawnAt: number
+              } | null
             } | null
           }
           if (data.ok) {
@@ -233,14 +253,18 @@ export default function ScreenPage() {
 
             const raffle = data.raffle ?? null
             if (raffle) {
-              if (lastDrawIdRef.current === null) {
-                lastDrawIdRef.current = raffle.draw.id // sync without replaying
-              } else if (raffle.draw.id > lastDrawIdRef.current) {
-                lastDrawIdRef.current = raffle.draw.id
-                startRaffleReveal(raffle.draw, raffle.names)
+              setRaffleMode(raffle.mode)
+              setRaffleStandby(raffle.standby)
+              if (raffle.draw) {
+                if (lastDrawIdRef.current === null) {
+                  lastDrawIdRef.current = raffle.draw.id // sync without replaying
+                } else if (raffle.draw.id > lastDrawIdRef.current) {
+                  lastDrawIdRef.current = raffle.draw.id
+                  startRaffleReveal(raffle.draw, raffle.entrants)
+                }
+              } else if (lastDrawIdRef.current === null) {
+                lastDrawIdRef.current = 0 // no draws yet; the first one animates
               }
-            } else if (lastDrawIdRef.current === null) {
-              lastDrawIdRef.current = 0 // no draws yet; the first one animates
             }
           }
         }
@@ -363,14 +387,41 @@ export default function ScreenPage() {
         ))}
       </div>
 
-      {/* Raffle reveal overlay — sits above carousel and danmaku. */}
+      {/* Raffle standby takeover — between draws while raffle mode is ON. */}
+      {raffleMode === 'on' && !raffleShow && (
+        <div className="raffle-overlay standby">
+          <p className="raffle-prize">🎁 抽獎時間 🎁</p>
+          {raffleStandby && raffleStandby.prizes.length > 0 && (
+            <ul className="raffle-prizelist">
+              {raffleStandby.prizes.map(p => (
+                <li key={p.name} className={p.remaining === 0 ? 'done' : ''}>
+                  {p.name}
+                  <span className="count">
+                    {p.remaining === 0 ? '已抽完' : `剩 ${p.remaining} / ${p.quantity}`}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+          <p className="raffle-standby-hint">
+            {raffleStandby ? `目前 ${raffleStandby.total} 人參加` : ''}
+            　·　官方帳號選單「抽獎」即可報名
+          </p>
+        </div>
+      )}
+
+      {/* Raffle reveal overlay — sits above carousel, danmaku and standby. */}
       {raffleShow && (
         <div className="raffle-overlay">
           <p className="raffle-prize">{raffleShow.prize}</p>
           {raffleStage === 'rolling' ? (
-            <p className="raffle-name">{rollingName}</p>
+            <>
+              <RaffleAvatar name={rolling.name} avatar={rolling.avatar} size="roll" />
+              <p className="raffle-name">{rolling.name}</p>
+            </>
           ) : (
             <>
+              <RaffleAvatar name={raffleShow.winnerName} avatar={raffleShow.winnerAvatar} size="reveal" />
               <p className="raffle-name reveal">{raffleShow.winnerName}</p>
               <p className="raffle-congrats">🎉 恭喜中獎 🎉</p>
               <div className="raffle-confetti" aria-hidden>
@@ -399,4 +450,13 @@ export default function ScreenPage() {
       )}
     </div>
   )
+}
+
+// LINE avatars are optional (users can hide them) — fall back to an initial.
+function RaffleAvatar({ name, avatar, size }: { name: string; avatar: string | null; size: 'roll' | 'reveal' }) {
+  if (avatar) {
+    // eslint-disable-next-line @next/next/no-img-element
+    return <img className={`raffle-avatar ${size}`} src={avatar} alt="" />
+  }
+  return <span className={`raffle-avatar fallback ${size}`}>{name.slice(0, 1)}</span>
 }
