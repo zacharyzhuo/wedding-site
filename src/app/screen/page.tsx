@@ -71,6 +71,39 @@ export default function ScreenPage() {
   const freshQueueRef = useRef<PhotoItem[]>([])
   const posRef = useRef(0) // position of currentPhoto in the chronological loop
 
+  // Raffle reveal. lastDrawIdRef === null means "haven't synced yet": the
+  // first poll records the current latest draw WITHOUT animating, so a
+  // screen restart mid-event doesn't replay an old reveal to the room.
+  const lastDrawIdRef = useRef<number | null>(null)
+  const raffleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [raffleShow, setRaffleShow] = useState<null | { prize: string; winnerName: string }>(null)
+  const [raffleStage, setRaffleStage] = useState<'rolling' | 'reveal'>('rolling')
+  const [rollingName, setRollingName] = useState('')
+  useEffect(() => () => { if (raffleTimerRef.current) clearTimeout(raffleTimerRef.current) }, [])
+
+  const startRaffleReveal = useCallback((draw: { prize: string; winnerName: string }, names: string[]) => {
+    if (raffleTimerRef.current) clearTimeout(raffleTimerRef.current)
+    const pool = names.length > 0 ? names : [draw.winnerName]
+    setRaffleShow({ prize: draw.prize, winnerName: draw.winnerName })
+    setRaffleStage('rolling')
+    // Name-roll that decelerates like a slot machine, then the reveal holds
+    // for 10 s before the screen returns to the carousel.
+    let delay = 70
+    const spin = () => {
+      setRollingName(pool[Math.floor(Math.random() * pool.length)])
+      delay *= 1.13
+      if (delay < 420) {
+        raffleTimerRef.current = setTimeout(spin, delay)
+      } else {
+        raffleTimerRef.current = setTimeout(() => {
+          setRaffleStage('reveal')
+          raffleTimerRef.current = setTimeout(() => setRaffleShow(null), 10000)
+        }, delay)
+      }
+    }
+    spin()
+  }, [])
+
   // Lift token from the query string. Done in an effect so this stays
   // statically renderable.
   useEffect(() => {
@@ -164,6 +197,10 @@ export default function ScreenPage() {
           const data = await res.json() as {
             ok: boolean; danmaku: DanmakuItem[]; photos: PhotoItem[]; cursor: number
             removedDanmaku?: number[]; removedPhotos?: number[]
+            raffle?: {
+              draw: { id: number; prize: string; winnerName: string; drawnAt: number }
+              names: string[]
+            } | null
           }
           if (data.ok) {
             // Insert oldest-first so the visual order on screen matches send order.
@@ -193,6 +230,18 @@ export default function ScreenPage() {
                 }
               }
             }
+
+            const raffle = data.raffle ?? null
+            if (raffle) {
+              if (lastDrawIdRef.current === null) {
+                lastDrawIdRef.current = raffle.draw.id // sync without replaying
+              } else if (raffle.draw.id > lastDrawIdRef.current) {
+                lastDrawIdRef.current = raffle.draw.id
+                startRaffleReveal(raffle.draw, raffle.names)
+              }
+            } else if (lastDrawIdRef.current === null) {
+              lastDrawIdRef.current = 0 // no draws yet; the first one animates
+            }
           }
         }
       } catch {
@@ -205,7 +254,7 @@ export default function ScreenPage() {
     tick()
 
     return () => { stopRef.current = true }
-  }, [ready, token, pushDanmaku, ingestPhotos, advancePhoto])
+  }, [ready, token, pushDanmaku, ingestPhotos, advancePhoto, startRaffleReveal])
 
   // Replay pool refresh. Fetches the latest approved set from scratch and
   // REPLACES the pool, so admin deletions age out of replays within
@@ -313,6 +362,34 @@ export default function ScreenPage() {
           </div>
         ))}
       </div>
+
+      {/* Raffle reveal overlay — sits above carousel and danmaku. */}
+      {raffleShow && (
+        <div className="raffle-overlay">
+          <p className="raffle-prize">{raffleShow.prize}</p>
+          {raffleStage === 'rolling' ? (
+            <p className="raffle-name">{rollingName}</p>
+          ) : (
+            <>
+              <p className="raffle-name reveal">{raffleShow.winnerName}</p>
+              <p className="raffle-congrats">🎉 恭喜中獎 🎉</p>
+              <div className="raffle-confetti" aria-hidden>
+                {/* Deterministic positions/delays — no randomness in render. */}
+                {Array.from({ length: 36 }).map((_, i) => (
+                  <span
+                    key={i}
+                    style={{
+                      left: `${(i * 137) % 100}%`,
+                      animationDelay: `${(i % 12) * 0.25}s`,
+                      background: ['#e8b4b8', '#f5e6c8', '#b8c8e8', '#d8e8c8'][i % 4],
+                    }}
+                  />
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+      )}
 
       {/* Connection hint, only when nothing comes in. Kept out of the way. */}
       {!token && (

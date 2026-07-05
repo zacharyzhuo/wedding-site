@@ -76,6 +76,57 @@
   box-shadow: 0 24px 64px rgba(0, 0, 0, 0.5);
 }
 
+/* Raffle reveal — full-screen takeover with a decelerating name roll, then
+   the winner pops with confetti. Kept above carousel + danmaku (z-20). */
+.raffle-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  background: rgba(31, 28, 26, 0.9);
+  animation: carousel-fade 400ms ease-in-out;
+}
+.raffle-prize {
+  color: rgba(250, 247, 241, 0.75);
+  font-size: 2.5rem;
+  letter-spacing: 0.3em;
+}
+.raffle-name {
+  margin-top: 2rem;
+  color: #faf7f1;
+  font-family: var(--font-serif, "Noto Serif TC"), serif;
+  font-size: 5rem;
+  line-height: 1.2;
+}
+.raffle-name.reveal {
+  animation: raffle-pop 600ms cubic-bezier(0.2, 1.6, 0.4, 1);
+}
+@keyframes raffle-pop {
+  from { transform: scale(0.4); opacity: 0; }
+  to   { transform: scale(1); opacity: 1; }
+}
+.raffle-congrats {
+  margin-top: 2rem;
+  font-size: 2rem;
+  color: rgba(250, 247, 241, 0.85);
+}
+.raffle-confetti span {
+  position: absolute;
+  top: -20px;
+  width: 10px;
+  height: 16px;
+  border-radius: 2px;
+  animation: confetti-fall 3.2s linear infinite;
+}
+@keyframes confetti-fall {
+  0%   { transform: translateY(-5vh) rotate(0deg); opacity: 1; }
+  100% { transform: translateY(110vh) rotate(720deg); opacity: 0.7; }
+}
+
 /* Buttons — neutral primary, used by both the OA-add CTA and form submit. */
 @layer components {
   .btn-primary {

@@ -30,6 +30,13 @@ type PhotoItem = {
   status: 'visible' | 'hidden'
   createdAt: number
 }
+type RaffleDraw = {
+  id: number
+  prize: string
+  winnerName: string
+  status: 'active' | 'forfeited'
+  drawnAt: number
+}
 
 const POLL_MS = 5000
 
@@ -42,6 +49,11 @@ export default function AdminLiffPage() {
   const [danmaku, setDanmaku] = useState<DanmakuItem[]>([])
   const [photos, setPhotos] = useState<PhotoItem[]>([])
   const [filter, setFilter] = useState<'all' | 'pending'>('all')
+  const [raffleTotal, setRaffleTotal] = useState(0)
+  const [draws, setDraws] = useState<RaffleDraw[]>([])
+  const [prizeInput, setPrizeInput] = useState('')
+  const [drawing, setDrawing] = useState(false)
+  const [raffleError, setRaffleError] = useState<string | null>(null)
 
   const authedFetch = useCallback(async (path: string, init?: RequestInit) => {
     const idToken = await getLiffIdToken()
@@ -69,6 +81,15 @@ export default function AdminLiffPage() {
       setDanmaku(data.danmaku)
       setPhotos(data.photos)
       setAuthState('ok')
+      // Raffle state rides the same refresh cadence; a failure here should
+      // not blank the moderation feed, so it swallows independently.
+      try {
+        const r = await authedFetch('/api/admin/raffle')
+        if (r.ok) {
+          const rd = await r.json() as { ok: boolean; total: number; draws: RaffleDraw[] }
+          if (rd.ok) { setRaffleTotal(rd.total); setDraws(rd.draws) }
+        }
+      } catch { /* next poll retries */ }
     } catch (e) {
       setAuthState('error')
       setAuthMessage(e instanceof Error ? e.message : 'unknown')
@@ -120,6 +141,50 @@ export default function AdminLiffPage() {
     }).catch(() => null)
     if (!res || !res.ok) setPhotos(before)
   }
+  async function doDraw(prize: string) {
+    const trimmed = prize.trim()
+    if (!trimmed || drawing) return
+    setDrawing(true)
+    setRaffleError(null)
+    try {
+      const res = await authedFetch('/api/admin/raffle/draw', {
+        method: 'POST', body: JSON.stringify({ prize: trimmed }),
+      })
+      const data = await res.json() as { ok?: boolean; draw?: RaffleDraw; error?: string }
+      if (!res.ok || !data.ok || !data.draw) throw new Error(data.error ?? `HTTP ${res.status}`)
+      setDraws(ds => [data.draw!, ...ds])
+      setPrizeInput('')
+    } catch (e) {
+      setRaffleError(e instanceof Error ? e.message : '開抽失敗')
+    } finally {
+      setDrawing(false)
+    }
+  }
+
+  // 重抽 = forfeit the absent winner, then immediately draw the same prize.
+  async function redraw(d: RaffleDraw) {
+    if (drawing) return
+    setDrawing(true)
+    setRaffleError(null)
+    try {
+      const f = await authedFetch(`/api/admin/raffle/${d.id}`, {
+        method: 'POST', body: JSON.stringify({ action: 'forfeit' }),
+      })
+      if (!f.ok) throw new Error(`forfeit HTTP ${f.status}`)
+      setDraws(ds => ds.map(x => (x.id === d.id ? { ...x, status: 'forfeited' as const } : x)))
+      const res = await authedFetch('/api/admin/raffle/draw', {
+        method: 'POST', body: JSON.stringify({ prize: d.prize }),
+      })
+      const data = await res.json() as { ok?: boolean; draw?: RaffleDraw; error?: string }
+      if (!res.ok || !data.ok || !data.draw) throw new Error(data.error ?? `HTTP ${res.status}`)
+      setDraws(ds => [data.draw!, ...ds])
+    } catch (e) {
+      setRaffleError(e instanceof Error ? e.message : '重抽失敗')
+    } finally {
+      setDrawing(false)
+    }
+  }
+
   async function toggleMode() {
     const prev = mode
     const next = mode === 'auto' ? 'manual' : 'auto'
@@ -220,6 +285,60 @@ export default function AdminLiffPage() {
             </li>
           ))}
         </ul>
+      </section>
+
+      <section className="mb-8">
+        <h2 className="mb-2 text-sm uppercase tracking-widest text-accent">
+          抽獎 <span className="normal-case tracking-normal text-ink/50">（{raffleTotal} 人參加）</span>
+        </h2>
+        <div className="flex gap-2">
+          <input
+            className="field-input flex-1"
+            placeholder="獎項名稱，例如：頭獎 iPhone"
+            value={prizeInput}
+            onChange={e => setPrizeInput(e.target.value)}
+            maxLength={40}
+          />
+          <button
+            className="btn-primary shrink-0 px-5"
+            disabled={drawing || !prizeInput.trim()}
+            onClick={() => doDraw(prizeInput)}
+          >
+            {drawing ? '抽獎中…' : '開抽 🎲'}
+          </button>
+        </div>
+        <p className="mt-1 text-xs text-ink/40">
+          按下開抽後 3 秒內，大螢幕會播放開獎動畫並公布得主。
+        </p>
+        {raffleError && <p className="mt-2 text-sm text-red-600">{raffleError}</p>}
+        {draws.length > 0 && (
+          <ul className="mt-3 space-y-2">
+            {draws.map(d => (
+              <li key={d.id} className={`rounded-md border bg-white p-3 ${
+                d.status === 'forfeited' ? 'border-champagne opacity-40' : 'border-champagne'
+              }`}>
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-sm">
+                      {d.prize} → <span className="font-medium">{d.winnerName}</span>
+                      {d.status === 'forfeited' && <span className="ml-2 text-xs text-red-600">已作廢</span>}
+                    </p>
+                    <p className="mt-1 text-xs text-ink/50">
+                      {new Date(d.drawnAt).toLocaleTimeString('zh-TW', { hour12: false })}
+                    </p>
+                  </div>
+                  {d.status === 'active' && (
+                    <button
+                      className="shrink-0 rounded bg-amber-600 px-2 py-1 text-xs text-cream"
+                      disabled={drawing}
+                      onClick={() => redraw(d)}
+                    >人不在，重抽</button>
+                  )}
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
       </section>
 
       <section>

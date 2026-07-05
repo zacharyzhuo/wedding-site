@@ -148,5 +148,34 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
         .all<{ id: number }>()).results) ?? []).map(r => r.id)
     : []
 
-  return json(200, { ok: true, danmaku, photos, cursor, removedDanmaku, removedPhotos })
+  // Latest ACTIVE draw so the screen can play the reveal when a new one
+  // appears (it tracks the last id it has seen). Entrant names ride along
+  // only when a draw exists — they feed the name-roll animation.
+  const latestDraw = await env.DB
+    .prepare(
+      `SELECT id, prize, winner_name, drawn_at
+       FROM raffle_draws WHERE status = 'active'
+       ORDER BY id DESC LIMIT 1`
+    )
+    .first<{ id: number; prize: string; winner_name: string; drawn_at: number }>()
+  const raffleNames = latestDraw
+    ? ((((await env.DB
+        .prepare(`SELECT display_name FROM raffle_entries ORDER BY RANDOM() LIMIT 40`)
+        .all<{ display_name: string }>()).results) ?? []).map(r => r.display_name))
+    : []
+
+  return json(200, {
+    ok: true, danmaku, photos, cursor, removedDanmaku, removedPhotos,
+    raffle: latestDraw
+      ? {
+          draw: {
+            id: latestDraw.id,
+            prize: latestDraw.prize,
+            winnerName: latestDraw.winner_name,
+            drawnAt: latestDraw.drawn_at,
+          },
+          names: raffleNames,
+        }
+      : null,
+  })
 }
