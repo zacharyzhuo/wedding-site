@@ -53,8 +53,10 @@ rendered pages, this mismatch is why.
 ## Stack & architecture
 
 Next.js 15.5 (App Router, static export) + React 19 + TypeScript, Tailwind
-3.4. `src/app/liff/{rsvp,danmaku,photo,admin}/page.tsx` are LIFF pages using
-`@line/liff`; `src/app/screen/page.tsx` is the big-screen carousel;
+3.4. `src/app/liff/{rsvp,danmaku,admin}/page.tsx` are LIFF pages using
+`@line/liff` (`danmaku` is the merged message+photo page — text-first with an
+optional photo attach; the standalone photo page was removed 2026-07-05);
+`src/app/screen/page.tsx` is the big-screen carousel;
 `src/app/rsvp-fallback/page.tsx` is the non-LINE RSVP form.
 
 `functions/api/*` are Cloudflare Pages Functions (Workers runtime): `rsvp.ts`

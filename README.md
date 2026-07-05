@@ -18,8 +18,10 @@ Architecture lives in `~/.claude/skills/wedding-planning/`.
 src/app/
   page.tsx                  public landing (CTA = add OA)
   liff/rsvp/page.tsx        LIFF: RSVP
-  liff/danmaku/page.tsx     LIFF: 想對新人說 (text → danmaku wall)
-  liff/photo/page.tsx       LIFF: 上傳照片 (R2 + auto-danmaku from caption)
+  liff/danmaku/page.tsx     LIFF: 想對新人說 (text → danmaku wall; optional
+                            photo attach → R2 + caption-as-danmaku. Merged
+                            page — the standalone photo page was removed
+                            2026-07-05 to keep one rich-menu tile)
   liff/admin/page.tsx       LIFF: 即時審核 (Zachary + Angelet only)
   screen/page.tsx           大螢幕: photo carousel + danmaku overlay
   rsvp-fallback/page.tsx    non-LINE web RSVP
@@ -140,9 +142,10 @@ LINE Developers → **LINE Login** channel → **LIFF** tab → Add. Repeat for 
 | LIFF name | Endpoint URL | Size | Scope |
 |---|---|---|---|
 | `rsvp`     | `https://wedding.zacharyzhuo.com/liff/rsvp`    | Tall | `profile` `openid` |
-| `danmaku`  | `https://wedding.zacharyzhuo.com/liff/danmaku` | Tall | `profile` `openid` |
-| `photo`    | `https://wedding.zacharyzhuo.com/liff/photo`   | Full | `profile` `openid` |
+| `danmaku`  | `https://wedding.zacharyzhuo.com/liff/danmaku` | Full | `profile` `openid` |
 | `admin`    | `https://wedding.zacharyzhuo.com/liff/admin`   | Full | `profile` `openid` |
+
+(`danmaku` covers photo upload too — the message-and-photo page is merged.)
 
 Copy each LIFF ID into the matching `NEXT_PUBLIC_LIFF_ID_*` env var.
 
@@ -248,7 +251,7 @@ here as a release-blocking bug.
 |---|---|---|
 | 1 | RSVP still works | open `/liff/rsvp` in LINE, submit, check `RSVP_Responses` tab in Sheet |
 | 2 | Danmaku appears on screen | `/liff/danmaku` send → `/screen?token=…` shows it within 6 s |
-| 3 | Photo uploads + appears | `/liff/photo` with caption → both photo + caption-as-danmaku show |
+| 3 | Photo uploads + appears | `/liff/danmaku` with a photo attached → both photo + message-as-danmaku show |
 | 4 | Caption shows on screen attached to photo | same upload, confirm display |
 | 5 | Keyword filter holds | send a message containing a `FORBIDDEN_WORDS` entry — should NOT appear; `/liff/admin` shows it under 待審 |
 | 6 | Admin can approve | from `/liff/admin`, approve a pending row → appears on screen on next poll |
