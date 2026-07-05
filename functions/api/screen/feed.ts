@@ -176,26 +176,46 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
         .map(r => ({ name: r.display_name, avatar: r.avatar_url })))
     : []
 
-  const raffleStandby = raffleMode === 'on'
-    ? {
-        total: (await env.DB
-          .prepare(`SELECT COUNT(*) AS n FROM raffle_entries`)
-          .first<{ n: number }>())?.n ?? 0,
-        prizes: ((((await env.DB
-          .prepare(
-            `SELECT p.name, p.quantity,
-                    (SELECT COUNT(*) FROM raffle_draws d
-                      WHERE d.prize_id = p.id AND d.status = 'active') AS won
-             FROM raffle_prizes p ORDER BY p.sort_order, p.id`
-          )
-          .all<{ name: string; quantity: number; won: number }>()).results) ?? [])
-          .map(p => ({
-            name: p.name,
-            quantity: p.quantity,
-            remaining: Math.max(0, p.quantity - p.won),
-          }))),
-      }
-    : null
+  // Standby payload: prize list with remaining stock AND the winners so far
+  // (name + avatar), so the room can see who already holds what.
+  let raffleStandby: {
+    total: number
+    prizes: Array<{
+      name: string; quantity: number; remaining: number
+      winners: Array<{ name: string; avatar: string | null }>
+    }>
+  } | null = null
+  if (raffleMode === 'on') {
+    const [totalRow, prizesRes, winsRes] = await Promise.all([
+      env.DB.prepare(`SELECT COUNT(*) AS n FROM raffle_entries`).first<{ n: number }>(),
+      env.DB
+        .prepare(`SELECT id, name, quantity FROM raffle_prizes ORDER BY sort_order, id`)
+        .all<{ id: number; name: string; quantity: number }>(),
+      env.DB
+        .prepare(
+          `SELECT d.prize_id, d.winner_name, e.avatar_url
+           FROM raffle_draws d
+           LEFT JOIN raffle_entries e ON e.line_user_id = d.winner_id
+           WHERE d.status = 'active' ORDER BY d.id`
+        )
+        .all<{ prize_id: number | null; winner_name: string; avatar_url: string | null }>(),
+    ])
+    const wins = winsRes.results ?? []
+    raffleStandby = {
+      total: totalRow?.n ?? 0,
+      prizes: (prizesRes.results ?? []).map(p => {
+        const winners = wins
+          .filter(w => w.prize_id === p.id)
+          .map(w => ({ name: w.winner_name, avatar: w.avatar_url }))
+        return {
+          name: p.name,
+          quantity: p.quantity,
+          remaining: Math.max(0, p.quantity - winners.length),
+          winners,
+        }
+      }),
+    }
+  }
 
   return json(200, {
     ok: true, danmaku, photos, cursor, removedDanmaku, removedPhotos,

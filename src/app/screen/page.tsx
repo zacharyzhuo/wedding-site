@@ -79,7 +79,10 @@ export default function ScreenPage() {
   const [raffleMode, setRaffleMode] = useState<'on' | 'off'>('off')
   const [raffleStandby, setRaffleStandby] = useState<null | {
     total: number
-    prizes: Array<{ name: string; quantity: number; remaining: number }>
+    prizes: Array<{
+      name: string; quantity: number; remaining: number
+      winners: Array<{ name: string; avatar: string | null }>
+    }>
   }>(null)
   const [raffleShow, setRaffleShow] = useState<null | {
     prize: string; winnerName: string; winnerAvatar: string | null
@@ -213,7 +216,10 @@ export default function ScreenPage() {
               mode: 'on' | 'off'
               standby: {
                 total: number
-                prizes: Array<{ name: string; quantity: number; remaining: number }>
+                prizes: Array<{
+                  name: string; quantity: number; remaining: number
+                  winners: Array<{ name: string; avatar: string | null }>
+                }>
               } | null
               entrants: Array<{ name: string; avatar: string | null }>
               draw: {
@@ -395,10 +401,27 @@ export default function ScreenPage() {
             <ul className="raffle-prizelist">
               {raffleStandby.prizes.map(p => (
                 <li key={p.name} className={p.remaining === 0 ? 'done' : ''}>
-                  {p.name}
-                  <span className="count">
-                    {p.remaining === 0 ? '已抽完' : `剩 ${p.remaining} / ${p.quantity}`}
-                  </span>
+                  <div>
+                    {p.name}
+                    <span className="count">
+                      {p.remaining === 0 ? '已抽完' : `剩 ${p.remaining} / ${p.quantity}`}
+                    </span>
+                  </div>
+                  {p.winners.length > 0 && (
+                    <div className="winners">
+                      {p.winners.map((w, i) => (
+                        <span key={i} className="winner-chip">
+                          {w.avatar ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img src={w.avatar} alt="" />
+                          ) : (
+                            <span className="winner-fallback">{w.name.slice(0, 1)}</span>
+                          )}
+                          {w.name}
+                        </span>
+                      ))}
+                    </div>
+                  )}
                 </li>
               ))}
             </ul>
