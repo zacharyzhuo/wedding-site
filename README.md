@@ -105,6 +105,34 @@ Also add the R2 bucket as a Pages binding with name **`PHOTOS`** (production).
 The binding isn't used in code today but reserves the name in case we move
 off presigned URLs later.
 
+Finally set CORS on the bucket — without this the browser's presigned PUT is
+blocked (uploads go cross-origin to `*.r2.cloudflarestorage.com`):
+
+```bash
+npx wrangler r2 bucket cors set wedding-photos --file r2-cors.json -y
+```
+
+with `r2-cors.json` (add localhost / preview origins as needed):
+
+```json
+{
+  "rules": [
+    {
+      "allowed": {
+        "origins": [
+          "https://wedding.zacharyzhuo.com",
+          "https://wedding-site-67g.pages.dev",
+          "http://localhost:8788"
+        ],
+        "methods": ["GET", "PUT"],
+        "headers": ["content-type"]
+      },
+      "maxAgeSeconds": 3600
+    }
+  ]
+}
+```
+
 ### 5. Register one LIFF app per page
 
 LINE Developers → **LINE Login** channel → **LIFF** tab → Add. Repeat for each:
