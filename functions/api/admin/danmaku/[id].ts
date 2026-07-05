@@ -34,10 +34,18 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env, params }
   }
   const newStatus = action === 'delete' ? 'deleted' : 'approved'
 
-  const res = await env.DB
-    .prepare(`UPDATE danmaku SET status = ? WHERE id = ?`)
-    .bind(newStatus, id)
-    .run()
+  // Approve bumps created_at to now: the screen's feed cursor has long moved
+  // past the original timestamp, so without the bump an approved row would
+  // never be delivered to the screen.
+  const res = action === 'approve'
+    ? await env.DB
+        .prepare(`UPDATE danmaku SET status = ?, created_at = ? WHERE id = ?`)
+        .bind(newStatus, Date.now(), id)
+        .run()
+    : await env.DB
+        .prepare(`UPDATE danmaku SET status = ? WHERE id = ?`)
+        .bind(newStatus, id)
+        .run()
 
   if ((res.meta.changes ?? 0) === 0) return err(404, 'not found')
   return ok({ id, status: newStatus })

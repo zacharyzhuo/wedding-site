@@ -38,16 +38,37 @@
 }
 
 /* Carousel — cross-fade between background photos. */
+/* Slide = blurred cover backdrop (same image) + the full photo contained in
+   a light frame on top. Portrait phone shots stay uncropped this way instead
+   of being gutted by background-size: cover on a landscape screen. */
 .carousel-slide {
   position: absolute;
   inset: 0;
-  background-position: center;
-  background-size: cover;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   background-color: #1f1c1a;
   opacity: 0;
   transition: opacity 800ms ease-in-out;
 }
 .carousel-slide.active { opacity: 1; }
+.carousel-backdrop {
+  position: absolute;
+  inset: -2rem; /* bleed past the blur's soft edge */
+  background-position: center;
+  background-size: cover;
+  filter: blur(28px) brightness(0.45);
+  transform: scale(1.08);
+}
+.carousel-photo {
+  position: relative;
+  max-width: 80%;
+  max-height: 86%;
+  object-fit: contain;
+  border: 10px solid rgba(255, 255, 255, 0.92);
+  border-radius: 4px;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.5);
+}
 
 /* Buttons — neutral primary, used by both the OA-add CTA and form submit. */
 @layer components {

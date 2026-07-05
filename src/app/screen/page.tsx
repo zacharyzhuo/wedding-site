@@ -29,7 +29,7 @@ type PhotoItem = {
 
 const POLL_BASE_MS = 3000
 const POLL_JITTER_MS = 500
-const CAROUSEL_INTERVAL_MS = 6000
+const CAROUSEL_INTERVAL_MS = 4000
 const DANMAKU_LIFETIME_MS = 14500 // matches CSS animation + a small safety margin
 const DANMAKU_ROW_COUNT = 4
 const PHOTO_RING_CAP = 30
@@ -209,9 +209,15 @@ export default function ScreenPage() {
             <div
               key={p.id}
               className={`carousel-slide ${i === carouselIndex ? 'active' : ''}`}
-              style={{ backgroundImage: `url(${p.url})` }}
               aria-hidden={i !== carouselIndex}
-            />
+            >
+              <div
+                className="carousel-backdrop"
+                style={{ backgroundImage: `url(${p.url})` }}
+              />
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img className="carousel-photo" src={p.url} alt="" />
+            </div>
           ))
         )}
       </div>

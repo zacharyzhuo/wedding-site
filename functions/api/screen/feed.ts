@@ -59,7 +59,7 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
       .prepare(
         `SELECT id, display_name, message, photo_id, created_at
          FROM danmaku
-         WHERE status = 'approved' AND created_at > ?
+         WHERE status = 'approved' AND created_at >= ?
          ORDER BY created_at DESC
          LIMIT ?`
       )
@@ -69,7 +69,7 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
       .prepare(
         `SELECT id, r2_key, uploader_name, caption, created_at
          FROM photos
-         WHERE status = 'visible' AND created_at > ?
+         WHERE status = 'visible' AND created_at >= ?
          ORDER BY created_at DESC
          LIMIT ?`
       )
@@ -97,14 +97,17 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
   }))
 
   // Cursor = max(createdAt) across both sets; client passes this back as
-  // `since`. Falling back to current server time keeps polling progressing
-  // even when there are no new rows.
-  const maxTs = Math.max(
+  // `since`. The cursor must NEVER outrun rows actually returned: the old
+  // Date.now() fallback on empty polls raced in-flight writes (a row whose
+  // timestamp was captured before the poll but committed after it was
+  // permanently skipped — a guest saw their photo but never the caption).
+  // With `>=` in the queries, boundary rows re-deliver on the next poll and
+  // the screen client dedupes them by id.
+  const cursor = Math.max(
     since,
     ...danmaku.map(d => d.createdAt),
     ...photos.map(p => p.createdAt),
   )
-  const cursor = maxTs > since ? maxTs : Date.now()
 
   return json(200, { ok: true, danmaku, photos, cursor })
 }
