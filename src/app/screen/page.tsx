@@ -32,7 +32,9 @@ const POLL_JITTER_MS = 500
 const CAROUSEL_INTERVAL_MS = 4000
 const DANMAKU_LIFETIME_MS = 14500 // matches CSS animation + a small safety margin
 const DANMAKU_ROW_COUNT = 4
-const PHOTO_RING_CAP = 30
+// The carousel keeps the WHOLE night chronologically and loops it — every
+// photo keeps getting airtime. The cap is a memory backstop only.
+const PHOTO_CAP = 1000
 // Replay: when the live stream goes quiet, re-fly a random old message so the
 // screen never sits empty between bursts. The pool is REPLACED on every
 // refresh (not accumulated), so a message the admin deletes stops replaying
@@ -45,7 +47,8 @@ export default function ScreenPage() {
   const [ready, setReady] = useState(false)
   const [token, setToken] = useState<string>('')
   const [photos, setPhotos] = useState<PhotoItem[]>([])
-  const [carouselIndex, setCarouselIndex] = useState(0)
+  const [currentPhoto, setCurrentPhoto] = useState<PhotoItem | null>(null)
+  const [previousPhoto, setPreviousPhoto] = useState<PhotoItem | null>(null)
   const [liveDanmaku, setLiveDanmaku] = useState<Array<DanmakuItem & { rowY: number; key: string }>>([])
   const cursorRef = useRef<number>(0)
   const seenDanmakuRef = useRef<Set<number>>(new Set())
@@ -61,6 +64,12 @@ export default function ScreenPage() {
   const photosRef = useRef<PhotoItem[]>([])
   useEffect(() => { liveDanmakuRef.current = liveDanmaku }, [liveDanmaku])
   useEffect(() => { photosRef.current = photos }, [photos])
+  const currentPhotoRef = useRef<PhotoItem | null>(null)
+  useEffect(() => { currentPhotoRef.current = currentPhoto }, [currentPhoto])
+  // New uploads jump the display queue — the uploader is standing in front
+  // of the screen waiting for exactly this moment.
+  const freshQueueRef = useRef<PhotoItem[]>([])
+  const posRef = useRef(0) // position of currentPhoto in the chronological loop
 
   // Lift token from the query string. Done in an effect so this stays
   // statically renderable.
@@ -95,25 +104,45 @@ export default function ScreenPage() {
     }
   }, [launchDanmaku])
 
+  // Advance the carousel one step: freshly uploaded photos jump the queue,
+  // otherwise continue the chronological all-night loop.
+  const advancePhoto = useCallback(() => {
+    const list = photosRef.current
+    if (list.length === 0) {
+      setPreviousPhoto(null)
+      setCurrentPhoto(null)
+      return
+    }
+    let nextIdx = -1
+    // Skip fresh entries that were removed before they got their turn.
+    while (freshQueueRef.current.length > 0 && nextIdx < 0) {
+      const fresh = freshQueueRef.current.shift()!
+      nextIdx = list.findIndex(p => p.id === fresh.id)
+    }
+    if (nextIdx < 0) nextIdx = (posRef.current + 1) % list.length
+    const next = list[nextIdx]
+    const cur = currentPhotoRef.current
+    if (cur && next.id === cur.id) return // single-photo night: hold still
+    posRef.current = nextIdx
+    setPreviousPhoto(cur)
+    setCurrentPhoto(next)
+  }, [])
+
   const ingestPhotos = useCallback((items: PhotoItem[]) => {
     if (items.length === 0) return
     const fresh = items.filter(p => !seenPhotoRef.current.has(p.id))
     if (fresh.length === 0) return
     fresh.forEach(p => seenPhotoRef.current.add(p.id))
-    setPhotos(prev => {
-      // Newest first, dedupe by id, cap to a sliding ring so memory stays bounded.
-      const merged = [...fresh, ...prev]
-      const seen = new Set<number>()
-      const out: PhotoItem[] = []
-      for (const p of merged) {
-        if (seen.has(p.id)) continue
-        seen.add(p.id)
-        out.push(p)
-        if (out.length >= PHOTO_RING_CAP) break
-      }
-      return out
-    })
-  }, [])
+    // Append chronologically (items arrive oldest-first after the caller's
+    // reverse). PHOTO_CAP only drops the oldest as a memory backstop.
+    const merged = [...photosRef.current, ...fresh]
+    const next = merged.length > PHOTO_CAP ? merged.slice(merged.length - PHOTO_CAP) : merged
+    photosRef.current = next
+    setPhotos(next)
+    freshQueueRef.current.push(...fresh)
+    // First photo of the night: show it now instead of waiting for the tick.
+    if (currentPhotoRef.current === null) advancePhoto()
+  }, [advancePhoto])
 
   // Polling loop.
   useEffect(() => {
@@ -152,8 +181,17 @@ export default function ScreenPage() {
             }
             if (rmP.size > 0) {
               const next = photosRef.current.filter(p => !rmP.has(p.id))
+              photosRef.current = next
               setPhotos(next)
-              setCarouselIndex(i => (next.length > 0 ? i % next.length : 0))
+              freshQueueRef.current = freshQueueRef.current.filter(p => !rmP.has(p.id))
+              const cur = currentPhotoRef.current
+              if (cur) {
+                if (rmP.has(cur.id)) {
+                  advancePhoto() // pull the hidden photo off screen now
+                } else {
+                  posRef.current = Math.max(0, next.findIndex(p => p.id === cur.id))
+                }
+              }
             }
           }
         }
@@ -167,7 +205,7 @@ export default function ScreenPage() {
     tick()
 
     return () => { stopRef.current = true }
-  }, [ready, token, pushDanmaku, ingestPhotos])
+  }, [ready, token, pushDanmaku, ingestPhotos, advancePhoto])
 
   // Replay pool refresh. Fetches the latest approved set from scratch and
   // REPLACES the pool, so admin deletions age out of replays within
@@ -215,38 +253,47 @@ export default function ScreenPage() {
     return () => clearInterval(t)
   }, [ready, token, launchDanmaku])
 
-  // Carousel rotation.
+  // Carousel rotation. Gated on a boolean (not photos.length) so upload
+  // bursts don't keep resetting the interval; advancePhoto holds still on a
+  // single-photo night.
+  const hasPhotos = photos.length > 0
   useEffect(() => {
-    if (photos.length <= 1) return
-    const t = setInterval(() => {
-      setCarouselIndex(i => (i + 1) % photos.length)
-    }, CAROUSEL_INTERVAL_MS)
+    if (!hasPhotos) return
+    const t = setInterval(advancePhoto, CAROUSEL_INTERVAL_MS)
     return () => clearInterval(t)
-  }, [photos.length])
+  }, [hasPhotos, advancePhoto])
 
   return (
     <div className="fixed inset-0 bg-ink overflow-hidden">
       {/* Photo carousel */}
       <div className="absolute inset-0">
-        {photos.length === 0 ? (
+        {currentPhoto === null ? (
           <div className="absolute inset-0 flex items-center justify-center text-cream/40 text-2xl">
             等待第一張照片…
           </div>
         ) : (
-          photos.map((p, i) => (
-            <div
-              key={p.id}
-              className={`carousel-slide ${i === carouselIndex ? 'active' : ''}`}
-              aria-hidden={i !== carouselIndex}
-            >
+          /* Only the outgoing and incoming slides live in the DOM — the
+             all-night list can run to hundreds of photos. */
+          <>
+            {previousPhoto && previousPhoto.id !== currentPhoto.id && (
+              <div key={`prev-${previousPhoto.id}`} className="carousel-slide prev" aria-hidden>
+                <div
+                  className="carousel-backdrop"
+                  style={{ backgroundImage: `url(${previousPhoto.url})` }}
+                />
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img className="carousel-photo" src={previousPhoto.url} alt="" />
+              </div>
+            )}
+            <div key={currentPhoto.id} className="carousel-slide active">
               <div
                 className="carousel-backdrop"
-                style={{ backgroundImage: `url(${p.url})` }}
+                style={{ backgroundImage: `url(${currentPhoto.url})` }}
               />
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img className="carousel-photo" src={p.url} alt="" />
+              <img className="carousel-photo" src={currentPhoto.url} alt="" />
             </div>
-          ))
+          </>
         )}
       </div>
 

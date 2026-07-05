@@ -41,6 +41,9 @@
 /* Slide = blurred cover backdrop (same image) + the full photo contained in
    a light frame on top. Portrait phone shots stay uncropped this way instead
    of being gutted by background-size: cover on a landscape screen. */
+/* Only two slides are mounted at a time (outgoing + incoming), so the
+   crossfade is a mount animation on the incoming slide over the fully
+   opaque outgoing one — a transition would never fire on mount. */
 .carousel-slide {
   position: absolute;
   inset: 0;
@@ -48,10 +51,13 @@
   align-items: center;
   justify-content: center;
   background-color: #1f1c1a;
-  opacity: 0;
-  transition: opacity 800ms ease-in-out;
 }
-.carousel-slide.active { opacity: 1; }
+.carousel-slide.prev { opacity: 1; }
+.carousel-slide.active { opacity: 1; animation: carousel-fade 800ms ease-in-out; }
+@keyframes carousel-fade {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
 .carousel-backdrop {
   position: absolute;
   inset: -2rem; /* bleed past the blur's soft edge */

@@ -96,7 +96,10 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
   const photos = await Promise.all(
     photoRows.map(async row => ({
       id: row.id,
-      url: await presignGet(env, row.r2_key),
+      // Signed GET URLs must outlive the whole event: the screen loops ALL
+      // of the night's photos, so the 10-minute default TTL would rot into
+      // broken images during quiet stretches.
+      url: await presignGet(env, row.r2_key, 60 * 60 * 12),
       uploaderName: row.uploader_name,
       caption: row.caption,
       createdAt: row.created_at,
