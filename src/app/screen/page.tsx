@@ -28,6 +28,10 @@ type PhotoItem = {
 }
 
 const POLL_BASE_MS = 3000
+// While raffle mode is ON the room is watching the screen expectantly, so
+// polls speed up — a draw should feel immediate, not "within a few seconds".
+// Raffle windows are short (minutes), the extra requests are negligible.
+const RAFFLE_POLL_MS = 1000
 const POLL_JITTER_MS = 500
 const CAROUSEL_INTERVAL_MS = 4000
 const DANMAKU_LIFETIME_MS = 14500 // matches CSS animation + a small safety margin
@@ -77,6 +81,8 @@ export default function ScreenPage() {
   const lastDrawIdRef = useRef<number | null>(null)
   const raffleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [raffleMode, setRaffleMode] = useState<'on' | 'off'>('off')
+  const raffleModeRef = useRef<'on' | 'off'>('off')
+  useEffect(() => { raffleModeRef.current = raffleMode }, [raffleMode])
   const [raffleStandby, setRaffleStandby] = useState<null | {
     total: number
     prizes: Array<{
@@ -278,7 +284,8 @@ export default function ScreenPage() {
         // Swallow transient errors — next tick will retry. Don't blank the
         // screen in front of guests just because Wi-Fi flickered.
       }
-      const delay = POLL_BASE_MS + Math.floor(Math.random() * POLL_JITTER_MS)
+      const base = raffleModeRef.current === 'on' ? RAFFLE_POLL_MS : POLL_BASE_MS
+      const delay = base + Math.floor(Math.random() * POLL_JITTER_MS)
       setTimeout(tick, delay)
     }
     tick()

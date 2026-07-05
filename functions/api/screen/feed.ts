@@ -69,7 +69,10 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
   const activeD = parseIds('active_d')
   const activeP = parseIds('active_p')
 
-  const [danmakuRes, photoRes] = await Promise.all([
+  // One parallel batch — these used to be sequential awaits, and every D1
+  // query is a network round-trip, which was most of the poll latency once
+  // the raffle queries joined the feed.
+  const [danmakuRes, photoRes, removedDRes, removedPRes, raffleModeRow, latestDraw] = await Promise.all([
     env.DB
       .prepare(
         `SELECT id, display_name, message, photo_id, created_at
@@ -90,6 +93,39 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
       )
       .bind(since, MAX_PER_KIND)
       .all<PhotoRow>(),
+    activeD.length
+      ? env.DB
+          .prepare(
+            `SELECT id FROM danmaku
+             WHERE id IN (${activeD.map(() => '?').join(',')})
+               AND status != 'approved'`
+          )
+          .bind(...activeD)
+          .all<{ id: number }>()
+      : Promise.resolve(null),
+    activeP.length
+      ? env.DB
+          .prepare(
+            `SELECT id FROM photos
+             WHERE id IN (${activeP.map(() => '?').join(',')})
+               AND status != 'visible'`
+          )
+          .bind(...activeP)
+          .all<{ id: number }>()
+      : Promise.resolve(null),
+    env.DB
+      .prepare(`SELECT value FROM settings WHERE key = 'raffle_mode'`)
+      .first<{ value: string }>(),
+    env.DB
+      .prepare(
+        `SELECT d.id, d.prize, d.winner_name, d.drawn_at,
+                e.avatar_url AS winner_avatar
+         FROM raffle_draws d
+         LEFT JOIN raffle_entries e ON e.line_user_id = d.winner_id
+         WHERE d.status = 'active'
+         ORDER BY d.id DESC LIMIT 1`
+      )
+      .first<{ id: number; prize: string; winner_name: string; drawn_at: number; winner_avatar: string | null }>(),
   ])
 
   const photoRows = photoRes.results ?? []
@@ -127,95 +163,63 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
     ...photos.map(p => p.createdAt),
   )
 
-  const removedDanmaku = activeD.length
-    ? (((await env.DB
-        .prepare(
-          `SELECT id FROM danmaku
-           WHERE id IN (${activeD.map(() => '?').join(',')})
-             AND status != 'approved'`
-        )
-        .bind(...activeD)
-        .all<{ id: number }>()).results) ?? []).map(r => r.id)
-    : []
-  const removedPhotos = activeP.length
-    ? (((await env.DB
-        .prepare(
-          `SELECT id FROM photos
-           WHERE id IN (${activeP.map(() => '?').join(',')})
-             AND status != 'visible'`
-        )
-        .bind(...activeP)
-        .all<{ id: number }>()).results) ?? []).map(r => r.id)
-    : []
+  const removedDanmaku = (removedDRes?.results ?? []).map(r => r.id)
+  const removedPhotos = (removedPRes?.results ?? []).map(r => r.id)
 
   // Raffle state for the screen: `mode` drives the standby takeover
-  // (「抽獎時間」 + prize list between draws), the latest ACTIVE draw drives
-  // the reveal (screen tracks the last id it has seen), and entrant
-  // name+avatar samples feed the roll animation. Winner avatar is joined
-  // from raffle_entries at read time.
-  const raffleModeRow = await env.DB
-    .prepare(`SELECT value FROM settings WHERE key = 'raffle_mode'`)
-    .first<{ value: string }>()
+  // (「抽獎時間」 + prize list + winners so far), the latest ACTIVE draw
+  // drives the reveal (screen tracks the last id it has seen), and entrant
+  // name+avatar samples feed the roll animation. Second parallel batch —
+  // these depend on raffleMode/latestDraw from the first batch.
   const raffleMode = raffleModeRow?.value === 'on' ? 'on' : 'off'
+  const needEntrants = latestDraw !== null || raffleMode === 'on'
+  const needStandby = raffleMode === 'on'
+  const [entrantsRes, totalRow, prizesRes, winsRes] = await Promise.all([
+    needEntrants
+      ? env.DB
+          .prepare(`SELECT display_name, avatar_url FROM raffle_entries ORDER BY RANDOM() LIMIT 40`)
+          .all<{ display_name: string; avatar_url: string | null }>()
+      : Promise.resolve(null),
+    needStandby
+      ? env.DB.prepare(`SELECT COUNT(*) AS n FROM raffle_entries`).first<{ n: number }>()
+      : Promise.resolve(null),
+    needStandby
+      ? env.DB
+          .prepare(`SELECT id, name, quantity FROM raffle_prizes ORDER BY sort_order, id`)
+          .all<{ id: number; name: string; quantity: number }>()
+      : Promise.resolve(null),
+    needStandby
+      ? env.DB
+          .prepare(
+            `SELECT d.prize_id, d.winner_name, e.avatar_url
+             FROM raffle_draws d
+             LEFT JOIN raffle_entries e ON e.line_user_id = d.winner_id
+             WHERE d.status = 'active' ORDER BY d.id`
+          )
+          .all<{ prize_id: number | null; winner_name: string; avatar_url: string | null }>()
+      : Promise.resolve(null),
+  ])
 
-  const latestDraw = await env.DB
-    .prepare(
-      `SELECT d.id, d.prize, d.winner_name, d.drawn_at,
-              e.avatar_url AS winner_avatar
-       FROM raffle_draws d
-       LEFT JOIN raffle_entries e ON e.line_user_id = d.winner_id
-       WHERE d.status = 'active'
-       ORDER BY d.id DESC LIMIT 1`
-    )
-    .first<{ id: number; prize: string; winner_name: string; drawn_at: number; winner_avatar: string | null }>()
+  const entrants = (entrantsRes?.results ?? [])
+    .map(r => ({ name: r.display_name, avatar: r.avatar_url }))
 
-  const entrants = (latestDraw || raffleMode === 'on')
-    ? ((((await env.DB
-        .prepare(`SELECT display_name, avatar_url FROM raffle_entries ORDER BY RANDOM() LIMIT 40`)
-        .all<{ display_name: string; avatar_url: string | null }>()).results) ?? [])
-        .map(r => ({ name: r.display_name, avatar: r.avatar_url })))
-    : []
-
-  // Standby payload: prize list with remaining stock AND the winners so far
-  // (name + avatar), so the room can see who already holds what.
-  let raffleStandby: {
-    total: number
-    prizes: Array<{
-      name: string; quantity: number; remaining: number
-      winners: Array<{ name: string; avatar: string | null }>
-    }>
-  } | null = null
-  if (raffleMode === 'on') {
-    const [totalRow, prizesRes, winsRes] = await Promise.all([
-      env.DB.prepare(`SELECT COUNT(*) AS n FROM raffle_entries`).first<{ n: number }>(),
-      env.DB
-        .prepare(`SELECT id, name, quantity FROM raffle_prizes ORDER BY sort_order, id`)
-        .all<{ id: number; name: string; quantity: number }>(),
-      env.DB
-        .prepare(
-          `SELECT d.prize_id, d.winner_name, e.avatar_url
-           FROM raffle_draws d
-           LEFT JOIN raffle_entries e ON e.line_user_id = d.winner_id
-           WHERE d.status = 'active' ORDER BY d.id`
-        )
-        .all<{ prize_id: number | null; winner_name: string; avatar_url: string | null }>(),
-    ])
-    const wins = winsRes.results ?? []
-    raffleStandby = {
-      total: totalRow?.n ?? 0,
-      prizes: (prizesRes.results ?? []).map(p => {
-        const winners = wins
-          .filter(w => w.prize_id === p.id)
-          .map(w => ({ name: w.winner_name, avatar: w.avatar_url }))
-        return {
-          name: p.name,
-          quantity: p.quantity,
-          remaining: Math.max(0, p.quantity - winners.length),
-          winners,
-        }
-      }),
-    }
-  }
+  const wins = winsRes?.results ?? []
+  const raffleStandby = needStandby
+    ? {
+        total: totalRow?.n ?? 0,
+        prizes: (prizesRes?.results ?? []).map(p => {
+          const winners = wins
+            .filter(w => w.prize_id === p.id)
+            .map(w => ({ name: w.winner_name, avatar: w.avatar_url }))
+          return {
+            name: p.name,
+            quantity: p.quantity,
+            remaining: Math.max(0, p.quantity - winners.length),
+            winners,
+          }
+        }),
+      }
+    : null
 
   return json(200, {
     ok: true, danmaku, photos, cursor, removedDanmaku, removedPhotos,
