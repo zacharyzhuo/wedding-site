@@ -27,9 +27,12 @@ Do not push unless the user asked. `output: 'export'` (next.config.mjs)
 writes static HTML to `out/`, matching `wrangler.jsonc`'s
 `pages_build_output_dir` and `npm run pages:deploy`.
 
-D1 and R2 must be provisioned once via the `wrangler` CLI before first
-deploy — `wrangler.jsonc`'s `database_id` is still the placeholder
-`REPLACE_ME_AFTER_WRANGLER_D1_CREATE`. Full bring-up steps are in README.md.
+**Deployed state (go-live 2026-07-05)**: production runs the full interactive
+layer. D1 `wedding-live` (real `database_id` now in `wrangler.jsonc`) and R2
+`wedding-photos` (CORS set — see README) are provisioned; Pages production
+secrets include the R2 keys and all four LIFF IDs. `.nvmrc` must stay an
+exact version (`20.20.2`) — Pages' asdf build cannot resolve nvm aliases like
+`lts/iron` and the build fails. Full bring-up steps are in README.md.
 
 ## Commands
 
