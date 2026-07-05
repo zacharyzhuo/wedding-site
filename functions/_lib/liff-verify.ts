@@ -42,6 +42,15 @@ export class LiffAuthError extends Error {
   }
 }
 
+// Per-isolate memo of already-verified tokens. LINE stays the source of
+// truth — each distinct token is verified with LINE once; we only skip
+// repeat round-trips for the SAME token within its validity window. The
+// admin page hits this hard: every click + every 5s feed poll re-sends the
+// same idToken, and the LINE round-trip per call was the main source of the
+// perceived button lag.
+const verifyCache = new Map<string, { user: VerifiedLineUser; expMs: number }>()
+const VERIFY_CACHE_MAX = 500
+
 /**
  * Reads the `x-line-id-token` header and verifies it with LINE.
  * Throws LiffAuthError on failure — callers can map to a 401/403 Response.
@@ -55,6 +64,9 @@ export async function verifyLineIdToken(
   }
   const idToken = request.headers.get('x-line-id-token')
   if (!idToken) throw new LiffAuthError('missing x-line-id-token')
+
+  const cached = verifyCache.get(idToken)
+  if (cached && Date.now() < cached.expMs) return cached.user
 
   const body = new URLSearchParams({ id_token: idToken, client_id: channelId })
   const res = await fetch('https://api.line.me/oauth2/v2.1/verify', {
@@ -77,9 +89,15 @@ export async function verifyLineIdToken(
     throw new LiffAuthError('idToken audience mismatch', 403)
   }
 
-  return {
+  const user: VerifiedLineUser = {
     userId: data.sub,
     displayName: data.name ?? '訪客',
     picture: data.picture,
   }
+  // Expire our memo 30 s before the token itself so we never serve a token
+  // LINE would already reject. Crude size cap — clearing wholesale is fine,
+  // the next call per token just re-verifies.
+  if (verifyCache.size >= VERIFY_CACHE_MAX) verifyCache.clear()
+  verifyCache.set(idToken, { user, expMs: data.exp * 1000 - 30_000 })
+  return user
 }

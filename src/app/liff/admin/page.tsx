@@ -98,24 +98,36 @@ export default function AdminLiffPage() {
     return () => clearInterval(t)
   }, [authState, refresh])
 
+  // All three actions update the UI optimistically — the buttons were
+  // unusably laggy when every click waited for the API round-trip plus a
+  // full feed refresh. On failure we revert; the 5s poll reconciles any
+  // remaining drift either way.
   async function setDanmakuStatus(id: number, action: 'delete' | 'approve') {
+    const nextStatus = action === 'delete' ? 'deleted' as const : 'approved' as const
+    const before = danmaku
+    setDanmaku(ds => ds.map(d => (d.id === id ? { ...d, status: nextStatus } : d)))
     const res = await authedFetch(`/api/admin/danmaku/${id}`, {
       method: 'POST', body: JSON.stringify({ action }),
-    })
-    if (res.ok) refresh()
+    }).catch(() => null)
+    if (!res || !res.ok) setDanmaku(before)
   }
   async function setPhotoStatus(id: number, action: 'hide' | 'unhide') {
+    const nextStatus = action === 'hide' ? 'hidden' as const : 'visible' as const
+    const before = photos
+    setPhotos(ps => ps.map(p => (p.id === id ? { ...p, status: nextStatus } : p)))
     const res = await authedFetch(`/api/admin/photos/${id}`, {
       method: 'POST', body: JSON.stringify({ action }),
-    })
-    if (res.ok) refresh()
+    }).catch(() => null)
+    if (!res || !res.ok) setPhotos(before)
   }
   async function toggleMode() {
+    const prev = mode
     const next = mode === 'auto' ? 'manual' : 'auto'
+    setMode(next)
     const res = await authedFetch('/api/admin/mode', {
       method: 'POST', body: JSON.stringify({ mode: next }),
-    })
-    if (res.ok) setMode(next)
+    }).catch(() => null)
+    if (!res || !res.ok) setMode(prev)
   }
 
   if (state.status === 'loading' || authState === 'loading') {

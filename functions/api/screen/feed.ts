@@ -54,6 +54,21 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
   const sinceRaw = Number(url.searchParams.get('since') ?? '0')
   const since = Number.isFinite(sinceRaw) && sinceRaw >= 0 ? sinceRaw : 0
 
+  // The screen reports what it is currently displaying (flying danmaku ids,
+  // carousel photo ids); we answer with the subset that is no longer
+  // displayable so admin delete/hide takes effect on the NEXT poll instead
+  // of only stopping future deliveries.
+  const parseIds = (name: string): number[] => {
+    const raw = url.searchParams.get(name)
+    if (!raw) return []
+    return raw.split(',')
+      .map(Number)
+      .filter(n => Number.isInteger(n) && n > 0)
+      .slice(0, 100)
+  }
+  const activeD = parseIds('active_d')
+  const activeP = parseIds('active_p')
+
   const [danmakuRes, photoRes] = await Promise.all([
     env.DB
       .prepare(
@@ -109,5 +124,26 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
     ...photos.map(p => p.createdAt),
   )
 
-  return json(200, { ok: true, danmaku, photos, cursor })
+  const removedDanmaku = activeD.length
+    ? (((await env.DB
+        .prepare(
+          `SELECT id FROM danmaku
+           WHERE id IN (${activeD.map(() => '?').join(',')})
+             AND status != 'approved'`
+        )
+        .bind(...activeD)
+        .all<{ id: number }>()).results) ?? []).map(r => r.id)
+    : []
+  const removedPhotos = activeP.length
+    ? (((await env.DB
+        .prepare(
+          `SELECT id FROM photos
+           WHERE id IN (${activeP.map(() => '?').join(',')})
+             AND status != 'visible'`
+        )
+        .bind(...activeP)
+        .all<{ id: number }>()).results) ?? []).map(r => r.id)
+    : []
+
+  return json(200, { ok: true, danmaku, photos, cursor, removedDanmaku, removedPhotos })
 }

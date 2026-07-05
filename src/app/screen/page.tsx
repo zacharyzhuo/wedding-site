@@ -54,6 +54,13 @@ export default function ScreenPage() {
   const replayPoolRef = useRef<DanmakuItem[]>([])
   const lastLaunchRef = useRef<number>(0)
   const lastReplayIdRef = useRef<number>(0)
+  // Mirrors of the display state so the poll closure can report what is
+  // currently on screen (for server-side removal reconciliation) without
+  // re-subscribing the polling effect to every state change.
+  const liveDanmakuRef = useRef<Array<DanmakuItem & { rowY: number; key: string }>>([])
+  const photosRef = useRef<PhotoItem[]>([])
+  useEffect(() => { liveDanmakuRef.current = liveDanmaku }, [liveDanmaku])
+  useEffect(() => { photosRef.current = photos }, [photos])
 
   // Lift token from the query string. Done in an effect so this stays
   // statically renderable.
@@ -116,17 +123,38 @@ export default function ScreenPage() {
     async function tick() {
       if (stopRef.current) return
       try {
+        // Report what's on screen so the server can tell us what the admin
+        // has deleted/hidden in the meantime.
+        const activeD = liveDanmakuRef.current.map(d => d.id).join(',')
+        const activeP = photosRef.current.map(p => p.id).join(',')
         const url = `/api/screen/feed?token=${encodeURIComponent(token)}&since=${cursorRef.current}`
+          + (activeD ? `&active_d=${activeD}` : '')
+          + (activeP ? `&active_p=${activeP}` : '')
         const res = await fetch(url, { cache: 'no-store' })
         if (res.ok) {
           const data = await res.json() as {
             ok: boolean; danmaku: DanmakuItem[]; photos: PhotoItem[]; cursor: number
+            removedDanmaku?: number[]; removedPhotos?: number[]
           }
           if (data.ok) {
             // Insert oldest-first so the visual order on screen matches send order.
             pushDanmaku([...data.danmaku].reverse())
             ingestPhotos([...data.photos].reverse())
             cursorRef.current = data.cursor
+
+            const rmD = new Set(data.removedDanmaku ?? [])
+            const rmP = new Set(data.removedPhotos ?? [])
+            if (rmD.size > 0) {
+              // Pull deleted messages out mid-flight and out of the replay
+              // pool — an admin delete must not keep circling the room.
+              setLiveDanmaku(prev => prev.filter(d => !rmD.has(d.id)))
+              replayPoolRef.current = replayPoolRef.current.filter(d => !rmD.has(d.id))
+            }
+            if (rmP.size > 0) {
+              const next = photosRef.current.filter(p => !rmP.has(p.id))
+              setPhotos(next)
+              setCarouselIndex(i => (next.length > 0 ? i % next.length : 0))
+            }
           }
         }
       } catch {
