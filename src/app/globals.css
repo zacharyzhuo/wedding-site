@@ -200,6 +200,106 @@
   100% { transform: translateY(110vh) rotate(720deg); opacity: 0.7; }
 }
 
+/* ── Invitation page (landing) ──────────────────────────────────────────
+   Arch = the signature shape, borrowed from the reference invitation:
+   rounded-top photo card + offset SOLID shadow (no blur — that hard edge
+   is the look). Every arch is a placeholder gradient today and becomes a
+   background-image after the 2026-09 shoot with zero layout change. */
+.arch {
+  border-radius: 999px 999px 18px 18px;
+  box-shadow: 14px 14px 0 #e8dccb;
+}
+.arch-hero {
+  width: min(72vw, 300px);
+  aspect-ratio: 3 / 4;
+  background:
+    linear-gradient(165deg, #eee3d3 0%, #e2cdb4 45%, #c5a37f 100%);
+}
+.arch-portrait {
+  width: 100%;
+  aspect-ratio: 3 / 4;
+  box-shadow: 10px 10px 0 #e8dccb;
+}
+
+/* Hero load-in: staggered fade-up via per-element animation-delay. */
+.hero-item {
+  opacity: 0;
+  animation: hero-up 900ms cubic-bezier(0.2, 0.7, 0.3, 1) forwards;
+}
+@keyframes hero-up {
+  from { opacity: 0; transform: translateY(26px); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* Scroll reveal — IntersectionObserver adds .in (src/app/page.tsx). */
+.reveal {
+  opacity: 0;
+  transform: translateY(24px);
+  transition: opacity 800ms ease, transform 800ms ease;
+}
+.reveal.in { opacity: 1; transform: none; }
+.reveal-delay-1 { transition-delay: 150ms; }
+
+/* Section ornament: hairline + diamond + hairline. */
+.ornament {
+  width: 120px;
+  height: 1px;
+  background: #d8c9b2;
+  position: relative;
+}
+.ornament::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 7px;
+  height: 7px;
+  background: #a08254;
+  transform: translate(-50%, -50%) rotate(45deg);
+}
+
+/* Run-of-show timeline inside the info card. */
+.timeline-item {
+  position: relative;
+  padding: 0 0 1.4rem 1.6rem;
+}
+.timeline-item:last-child { padding-bottom: 0; }
+.timeline-dot {
+  position: absolute;
+  left: 0;
+  top: 0.45em;
+  width: 9px;
+  height: 9px;
+  border-radius: 9999px;
+  background: #a08254;
+}
+.timeline-line {
+  position: absolute;
+  left: 4px;
+  top: calc(0.45em + 12px);
+  bottom: 2px;
+  width: 1px;
+  background: #e8dccb;
+}
+
+/* Gallery placeholder marquee — content duplicated once in JSX, slide by
+   half for a seamless loop. */
+.invite-marquee {
+  display: flex;
+  width: max-content;
+  animation: invite-marquee 36s linear infinite;
+}
+@keyframes invite-marquee {
+  from { transform: translateX(0); }
+  to   { transform: translateX(-50%); }
+}
+.invite-tile {
+  width: 10.5rem;
+  aspect-ratio: 3 / 4;
+  border-radius: 999px 999px 14px 14px;
+  flex-shrink: 0;
+}
+
 /* Buttons — neutral primary, used by both the OA-add CTA and form submit. */
 @layer components {
   .btn-primary {
@@ -207,6 +307,16 @@
            bg-ink text-cream px-8 py-3 text-base font-medium
            transition hover:opacity-90 active:opacity-80
            disabled:opacity-40 disabled:cursor-not-allowed;
+  }
+  .btn-invert {
+    @apply inline-flex items-center justify-center rounded-full
+           bg-cream text-ink px-8 py-3 text-base font-medium
+           transition hover:opacity-90 active:opacity-80;
+  }
+  .btn-outline {
+    @apply inline-flex items-center justify-center rounded-full
+           border border-accent/60 text-accent px-6 py-2 text-sm
+           transition hover:bg-accent hover:text-cream;
   }
   .field-label { @apply block text-sm text-ink/70 mb-1; }
   .field-input {

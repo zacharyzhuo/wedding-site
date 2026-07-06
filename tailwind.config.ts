@@ -13,8 +13,10 @@ const config: Config = {
         accent: '#a08254',
       },
       fontFamily: {
-        serif: ['"Noto Serif TC"', 'Cormorant Garamond', 'serif'],
-        sans: ['"Noto Sans TC"', 'Inter', 'sans-serif'],
+        serif: ['var(--font-serif)', '"Noto Serif TC"', 'serif'],
+        sans: ['"Noto Sans TC"', 'sans-serif'],
+        display: ['var(--font-display)', 'var(--font-serif)', 'serif'],
+        script: ['var(--font-script)', 'cursive'],
       },
     },
   },
