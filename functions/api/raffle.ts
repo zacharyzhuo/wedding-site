@@ -1,13 +1,28 @@
 // GET  /api/raffle — has this LINE user entered? + total entrant count.
 // POST /api/raffle — enter the draw. Idempotent upsert keyed on the LINE
 // userId: one account = one entry, re-entering just refreshes name/avatar.
+//
+// Fallback identity: a guest can reach the raffle without ever RSVPing or
+// joining a party (e.g. they only added the OA and tapped the raffle rich
+// menu item). If they have no guest_identity row yet, POST requires
+// realName (+ optional diet) and writes one with source:'raffle',
+// role:'solo' — same shape as the /api/party/join fallback, just untethered
+// from any party. Already-identified guests skip straight to entering, no
+// name prompt.
 
-import { err, ok } from '../_lib/http'
+import { err, ok, readJson } from '../_lib/http'
 import { LiffAuthError, verifyLineIdToken } from '../_lib/liff-verify'
+import { getIdentity, upsertIdentity, mirrorToSheet } from '../_lib/identity'
 
 interface Env {
   DB: D1Database
   LINE_LOGIN_CHANNEL_ID?: string
+  RSVP_WEBHOOK_URL?: string
+}
+
+interface Body {
+  realName?: string
+  diet?: string
 }
 
 async function total(env: Env): Promise<number> {
@@ -40,6 +55,40 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
     if (e instanceof LiffAuthError) return err(e.status, e.message)
     throw e
   }
+
+  const existing = await getIdentity(env.DB, user.userId)
+  if (!existing) {
+    const body = await readJson<Body>(request)
+    const realName = body?.realName?.trim()
+    if (!realName) return err(400, 'name_required')
+
+    const now = Date.now()
+    await upsertIdentity(env.DB, {
+      line_user_id: user.userId,
+      real_name: realName,
+      diet: body?.diet ?? null,
+      party_id: null,
+      role: 'solo',
+      display_name: user.displayName,
+      avatar_url: user.picture ?? null,
+      source: 'raffle',
+    }, now)
+
+    // D1 write above is the source of truth; the Sheet mirror is best-effort
+    // visibility for the couple and never blocks/fails the request — same
+    // treatment as /api/party/join.
+    await mirrorToSheet(env.RSVP_WEBHOOK_URL, 'identity', {
+      line_user_id: user.userId,
+      real_name: realName,
+      diet: body?.diet ?? null,
+      party_id: null,
+      role: 'solo',
+      display_name: user.displayName,
+      source: 'raffle',
+      updated_at: new Date(now).toISOString(),
+    })
+  }
+
   await env.DB
     .prepare(
       `INSERT INTO raffle_entries (line_user_id, display_name, avatar_url, created_at)
