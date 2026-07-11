@@ -85,6 +85,7 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
   if (!isValid(body)) return err(400, 'invalid payload')
 
   let leader: { partyId: string; joinUrl: string } | undefined
+  let lineUserId: string | undefined
 
   if (body.source === 'liff') {
     let user: VerifiedLineUser
@@ -95,17 +96,24 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
       throw e
     }
     if (!env.LINE_LIFF_ID_JOIN) return err(500, 'server not configured (LINE_LIFF_ID_JOIN)')
+    lineUserId = user.userId
     leader = await upsertLeaderParty(env.DB, user, body, env.LINE_LIFF_ID_JOIN, env.RSVP_WEBHOOK_URL)
   }
 
   // Forward to Apps Script. Apps Script's doPost reads e.postData.contents,
   // so we send the JSON body straight through with content-type text/plain
-  // to avoid an extra CORS preflight on the Apps Script side.
+  // to avoid an extra CORS preflight on the Apps Script side. lineUserId is
+  // included (camelCase — matches what the .gs's handleRsvp_ reads via
+  // body.lineUserId) for the LIFF path only, so its UPSERT-by-line_user_id
+  // updates the guest's existing RSVP_Responses row instead of always
+  // appending a duplicate. Omitted (undefined, dropped by JSON.stringify)
+  // for the fallback path, which keeps appending as before.
   const upstream = await fetch(env.RSVP_WEBHOOK_URL, {
     method: 'POST',
     headers: { 'content-type': 'text/plain;charset=utf-8' },
     body: JSON.stringify({
       ...body,
+      lineUserId,
       partyId: leader?.partyId ?? null,
       submittedAt: new Date().toISOString(),
     }),
@@ -147,9 +155,6 @@ async function upsertLeaderParty(
     notes: body.notes?.trim() ? body.notes : null,
   }
   await createParty(db, partyRow, now)
-  // D1 write above is the source of truth; the Sheet mirror below is
-  // best-effort visibility for the couple and never blocks/fails the request.
-  await mirrorToSheet(webhookUrl, 'party', { ...partyRow, updated_at: new Date(now).toISOString() })
 
   const identityRow = {
     line_user_id: user.userId,
@@ -162,16 +167,24 @@ async function upsertLeaderParty(
     source: 'rsvp' as const,
   }
   await upsertIdentity(db, identityRow, now)
-  await mirrorToSheet(webhookUrl, 'identity', {
-    line_user_id: identityRow.line_user_id,
-    real_name: identityRow.real_name,
-    diet: identityRow.diet,
-    party_id: identityRow.party_id,
-    role: identityRow.role,
-    display_name: identityRow.display_name,
-    source: identityRow.source,
-    updated_at: new Date(now).toISOString(),
-  })
+
+  // D1 writes above are the source of truth; the Sheet mirrors below are
+  // best-effort visibility for the couple and never block/fail the request.
+  // The two mirrors are independent of each other, so run them concurrently
+  // instead of paying their latency twice.
+  await Promise.all([
+    mirrorToSheet(webhookUrl, 'party', { ...partyRow, updated_at: new Date(now).toISOString() }),
+    mirrorToSheet(webhookUrl, 'identity', {
+      line_user_id: identityRow.line_user_id,
+      real_name: identityRow.real_name,
+      diet: identityRow.diet,
+      party_id: identityRow.party_id,
+      role: identityRow.role,
+      display_name: identityRow.display_name,
+      source: identityRow.source,
+      updated_at: new Date(now).toISOString(),
+    }),
+  ])
 
   // Re-read after the write so the returned joinUrl always points at
   // whichever party this identity currently belongs to in D1 — keeps it

@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest'
-import { generatePartyCode, mergeIdentity, type IdentityRow } from './identity'
+import { describe, it, expect, vi, afterEach } from 'vitest'
+import { generatePartyCode, mergeIdentity, mirrorToSheet, type IdentityRow } from './identity'
 
 describe('generatePartyCode', () => {
   it('回傳 8 碼、只含 Crockford base32 字元', () => {
@@ -64,5 +64,42 @@ describe('mergeIdentity', () => {
     const r = mergeIdentity(existing, { line_user_id: 'U1', real_name: '王小明', role: 'member', source: 'join' }, 200)
     expect(r.display_name).toBe('舊')
     expect(r.avatar_url).toBe('http://old')
+  })
+})
+
+describe('mirrorToSheet', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('webhookUrl 為 falsy → 不呼叫 fetch,直接 resolve', async () => {
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+    await expect(mirrorToSheet(undefined, 'identity', { line_user_id: 'U1' })).resolves.toBeUndefined()
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('fetch reject → 仍然 resolve,不拋出(mirror 失敗不影響主流程)', async () => {
+    const fetchMock = vi.fn().mockRejectedValue(new Error('network down'))
+    vi.stubGlobal('fetch', fetchMock)
+    await expect(
+      mirrorToSheet('https://example.com/webhook', 'party', { party_id: 'P1' }),
+    ).resolves.toBeUndefined()
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('正常呼叫 → fetch 被呼叫一次,body 為含 kind 與 row 欄位的 JSON', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response('ok'))
+    vi.stubGlobal('fetch', fetchMock)
+    const row = { line_user_id: 'U1', real_name: '王小明', party_id: 'P1' }
+
+    await mirrorToSheet('https://example.com/webhook', 'identity', row)
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const [url, init] = fetchMock.mock.calls[0]
+    expect(url).toBe('https://example.com/webhook')
+    expect(init.method).toBe('POST')
+    const parsedBody = JSON.parse(init.body)
+    expect(parsedBody).toMatchObject({ kind: 'identity', ...row })
   })
 })

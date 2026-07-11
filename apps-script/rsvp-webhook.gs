@@ -146,6 +146,23 @@ function getOrCreateTab_(tabName, headers) {
     sheet = ss.insertSheet(tabName);
     sheet.appendRow(headers);
     sheet.setFrozenRows(1);
+    return sheet;
+  }
+  // Tab already existed — reconcile row 1 against the expected headers.
+  // The live RSVP_Responses tab predates this field model (old 11-column
+  // header); without this check, new rows written under the new column
+  // model would silently land under stale header labels. NOTE: this only
+  // overwrites the header row — historical rows written under the old
+  // layout keep their OLD column positions (they are NOT reshuffled), so
+  // they may need a one-time manual clear by the couple. As of this change
+  // the couple's RSVP data so far is all test data, so a manual wipe is
+  // safe.
+  const lastCol = sheet.getLastColumn();
+  const existingHeaders = lastCol > 0 ? sheet.getRange(1, 1, 1, lastCol).getValues()[0] : [];
+  const headersMatch = existingHeaders.length === headers.length &&
+    headers.every(function (h, i) { return existingHeaders[i] === h; });
+  if (!headersMatch) {
+    sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
   }
   return sheet;
 }
