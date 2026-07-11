@@ -19,7 +19,7 @@
 
 import { err, ok } from '../_lib/http'
 import { LiffAuthError, verifyLineIdToken, type VerifiedLineUser } from '../_lib/liff-verify'
-import { createParty, generatePartyCode, getIdentity, upsertIdentity } from '../_lib/identity'
+import { createParty, generatePartyCode, getIdentity, mirrorToSheet, upsertIdentity } from '../_lib/identity'
 
 interface Env {
   DB: D1Database
@@ -95,7 +95,7 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
       throw e
     }
     if (!env.LINE_LIFF_ID_JOIN) return err(500, 'server not configured (LINE_LIFF_ID_JOIN)')
-    leader = await upsertLeaderParty(env.DB, user, body, env.LINE_LIFF_ID_JOIN)
+    leader = await upsertLeaderParty(env.DB, user, body, env.LINE_LIFF_ID_JOIN, env.RSVP_WEBHOOK_URL)
   }
 
   // Forward to Apps Script. Apps Script's doPost reads e.postData.contents,
@@ -127,6 +127,7 @@ async function upsertLeaderParty(
   user: VerifiedLineUser,
   body: RsvpBody,
   joinLiffId: string,
+  webhookUrl: string,
 ): Promise<{ partyId: string; joinUrl: string }> {
   const now = Date.now()
   const existing = await getIdentity(db, user.userId)
@@ -134,7 +135,7 @@ async function upsertLeaderParty(
     ? existing.party_id
     : generatePartyCode()
 
-  await createParty(db, {
+  const partyRow = {
     party_id: code,
     leader_user_id: user.userId,
     side: body.side,
@@ -144,18 +145,33 @@ async function upsertLeaderParty(
     child_count: body.childCount,
     child_seat_count: body.childSeatCount,
     notes: body.notes?.trim() ? body.notes : null,
-  }, now)
+  }
+  await createParty(db, partyRow, now)
+  // D1 write above is the source of truth; the Sheet mirror below is
+  // best-effort visibility for the couple and never blocks/fails the request.
+  await mirrorToSheet(webhookUrl, 'party', { ...partyRow, updated_at: new Date(now).toISOString() })
 
-  await upsertIdentity(db, {
+  const identityRow = {
     line_user_id: user.userId,
     real_name: body.realName,
     diet: body.leaderDiet,
     party_id: code,
-    role: 'leader',
+    role: 'leader' as const,
     display_name: user.displayName,
     avatar_url: user.picture ?? null,
-    source: 'rsvp',
-  }, now)
+    source: 'rsvp' as const,
+  }
+  await upsertIdentity(db, identityRow, now)
+  await mirrorToSheet(webhookUrl, 'identity', {
+    line_user_id: identityRow.line_user_id,
+    real_name: identityRow.real_name,
+    diet: identityRow.diet,
+    party_id: identityRow.party_id,
+    role: identityRow.role,
+    display_name: identityRow.display_name,
+    source: identityRow.source,
+    updated_at: new Date(now).toISOString(),
+  })
 
   // Re-read after the write so the returned joinUrl always points at
   // whichever party this identity currently belongs to in D1 — keeps it

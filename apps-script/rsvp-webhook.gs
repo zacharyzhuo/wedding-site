@@ -2,10 +2,17 @@
  * RSVP webhook — Apps Script web app.
  *
  * Lives inside the couple's wedding-planning Google Sheet
- * (Extensions → Apps Script). Receives RSVP submissions from the wedding-site
- * Cloudflare Pages Function and writes them to the `RSVP_Responses` tab.
+ * (Extensions → Apps Script). Receives POSTs from the wedding-site
+ * Cloudflare Pages Functions and mirrors them into Sheet tabs. D1 is the
+ * operational source of truth during the event; these tabs are a
+ * read-only visibility copy for the couple (their decision).
  *
- * Semantics:
+ * doPost dispatches on body.kind:
+ *   - (default, no kind) RSVP submission        → `RSVP_Responses` tab.
+ *   - kind: 'party'                              → `Parties` tab, UPSERT by party_id.
+ *   - kind: 'identity'                            → `Guest_Identity` tab, UPSERT by line_user_id.
+ *
+ * RSVP_Responses semantics:
  *   - LIFF submission (has lineUserId): UPSERT — update the existing row for
  *     this LINE userId in place, otherwise append. Result: one row per LINE
  *     user, latest answer wins. A guest can revise mistakes without polluting
@@ -28,70 +35,129 @@
 
 // ── CONFIG ───────────────────────────────────────────────────────────────
 const SHEET_ID = '1EO3CIi1U5hwLpmux--DFeJ7Fe8OPMAsMeeIBf8CrHic';  // the wedding-planning Sheet
-const TAB_NAME = 'RSVP_Responses';
-// ─────────────────────────────────────────────────────────────────────────
 
-const HEADERS = [
-  'timestamp', 'source', 'line_user_id', 'name',
-  'side', 'relationship', 'attending',
-  'headcount', 'child_count', 'diet', 'message',
+const RSVP_TAB = 'RSVP_Responses';
+const RSVP_HEADERS = [
+  'timestamp', 'source', 'line_user_id', 'party_id', 'real_name',
+  'side', 'relationship', 'attending', 'adult_count', 'child_count',
+  'child_seat_count', 'leader_diet', 'notes', 'message',
 ];
-const COL_LINE_USER_ID = 3;  // 1-indexed column position in the Sheet
+const RSVP_KEY_COL = 3;  // line_user_id, 1-indexed column position in the Sheet
+
+const PARTIES_TAB = 'Parties';
+const PARTIES_HEADERS = [
+  'party_id', 'leader_user_id', 'side', 'relationship', 'attending',
+  'adult_count', 'child_count', 'child_seat_count', 'notes', 'updated_at',
+];
+const PARTIES_KEY_COL = 1;  // party_id
+
+const IDENTITY_TAB = 'Guest_Identity';
+const IDENTITY_HEADERS = [
+  'line_user_id', 'real_name', 'diet', 'party_id', 'role',
+  'display_name', 'source', 'updated_at',
+];
+const IDENTITY_KEY_COL = 1;  // line_user_id
+// ─────────────────────────────────────────────────────────────────────────
 
 function doPost(e) {
   try {
     const body = JSON.parse(e.postData.contents);
-    const sheet = getOrCreateTab_();
-    const row = [
-      body.submittedAt || new Date().toISOString(),
-      body.source || '',
-      body.lineUserId || '',
-      body.name || '',
-      body.side || '',
-      body.relationship || '',
-      body.attending || '',
-      body.headcount ?? '',
-      body.childCount ?? '',
-      body.diet || '',
-      body.message || '',
-    ];
-
-    const existingRow = body.lineUserId
-      ? findRowByUserId_(sheet, body.lineUserId)
-      : -1;
-
-    if (existingRow > 0) {
-      // Update in place — latest answer wins for this LINE user.
-      sheet.getRange(existingRow, 1, 1, row.length).setValues([row]);
-    } else {
-      sheet.appendRow(row);
-    }
-
-    return jsonOk_({ ok: true, mode: existingRow > 0 ? 'updated' : 'appended' });
+    if (body.kind === 'party') return handleParty_(body);
+    if (body.kind === 'identity') return handleIdentity_(body);
+    return handleRsvp_(body);
   } catch (err) {
     return jsonOk_({ ok: false, error: String(err) });
   }
 }
 
-function getOrCreateTab_() {
+function handleRsvp_(body) {
+  const sheet = getOrCreateTab_(RSVP_TAB, RSVP_HEADERS);
+  const row = [
+    body.submittedAt || new Date().toISOString(),
+    body.source || '',
+    body.lineUserId || '',
+    body.partyId || '',
+    body.realName || '',
+    body.side || '',
+    body.relationship || '',
+    body.attending || '',
+    body.adultCount ?? '',
+    body.childCount ?? '',
+    body.childSeatCount ?? '',
+    body.leaderDiet || '',
+    body.notes || '',
+    body.message || '',
+  ];
+  const mode = upsertRow_(sheet, RSVP_KEY_COL, body.lineUserId, row);
+  return jsonOk_({ ok: true, mode: mode });
+}
+
+function handleParty_(body) {
+  const sheet = getOrCreateTab_(PARTIES_TAB, PARTIES_HEADERS);
+  const row = [
+    body.party_id || '',
+    body.leader_user_id || '',
+    body.side || '',
+    body.relationship || '',
+    body.attending || '',
+    body.adult_count ?? '',
+    body.child_count ?? '',
+    body.child_seat_count ?? '',
+    body.notes || '',
+    body.updated_at || new Date().toISOString(),
+  ];
+  const mode = upsertRow_(sheet, PARTIES_KEY_COL, body.party_id, row);
+  return jsonOk_({ ok: true, mode: mode });
+}
+
+function handleIdentity_(body) {
+  const sheet = getOrCreateTab_(IDENTITY_TAB, IDENTITY_HEADERS);
+  const row = [
+    body.line_user_id || '',
+    body.real_name || '',
+    body.diet || '',
+    body.party_id || '',
+    body.role || '',
+    body.display_name || '',
+    body.source || '',
+    body.updated_at || new Date().toISOString(),
+  ];
+  const mode = upsertRow_(sheet, IDENTITY_KEY_COL, body.line_user_id, row);
+  return jsonOk_({ ok: true, mode: mode });
+}
+
+// Generic UPSERT: updates the row whose value in keyCol matches keyValue, or
+// appends a new row if no match (or no keyValue) is found. Shared by all
+// three tabs above.
+function upsertRow_(sheet, keyCol, keyValue, row) {
+  const existingRow = keyValue ? findRowByKey_(sheet, keyCol, keyValue) : -1;
+  if (existingRow > 0) {
+    sheet.getRange(existingRow, 1, 1, row.length).setValues([row]);
+    return 'updated';
+  }
+  sheet.appendRow(row);
+  return 'appended';
+}
+
+function getOrCreateTab_(tabName, headers) {
   const ss = SpreadsheetApp.openById(SHEET_ID);
-  let sheet = ss.getSheetByName(TAB_NAME);
+  let sheet = ss.getSheetByName(tabName);
   if (!sheet) {
-    sheet = ss.insertSheet(TAB_NAME);
-    sheet.appendRow(HEADERS);
+    sheet = ss.insertSheet(tabName);
+    sheet.appendRow(headers);
     sheet.setFrozenRows(1);
   }
   return sheet;
 }
 
-function findRowByUserId_(sheet, userId) {
-  if (!userId) return -1;
+function findRowByKey_(sheet, keyCol, keyValue) {
+  if (!keyValue) return -1;
   const lastRow = sheet.getLastRow();
   if (lastRow < 2) return -1;
-  // Read only the line_user_id column to keep this cheap even at 200+ rows.
-  const values = sheet.getRange(2, COL_LINE_USER_ID, lastRow - 1, 1).getValues();
+  // Read only the key column to keep this cheap even at 200+ rows.
+  const values = sheet.getRange(2, keyCol, lastRow - 1, 1).getValues();
   for (let i = 0; i < values.length; i++) {
-    if (values[i][0] === userId) return i + 2;  // +2 = skip header + 0-index→1-index
+    if (values[i][0] === keyValue) return i + 2;  // +2 = skip header + 0-index→1-index
   }
   return -1;
 }

@@ -124,3 +124,24 @@ export async function createParty(
   ).bind(p.party_id, p.leader_user_id, p.side, p.relationship, p.attending,
          p.adult_count, p.child_count, p.child_seat_count, p.notes, now, now).run()
 }
+
+// Fire-and-forget-ish mirror of a D1 identity/party row into the Sheet.
+// Non-fatal: a mirror failure must never break the guest's request. D1 is the
+// operational source of truth; the Sheet is a read-only visibility copy for
+// the couple.
+export async function mirrorToSheet(
+  webhookUrl: string | undefined,
+  kind: 'identity' | 'party',
+  row: Record<string, unknown>,
+): Promise<void> {
+  if (!webhookUrl) return
+  try {
+    await fetch(webhookUrl, {
+      method: 'POST',
+      headers: { 'content-type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ kind, ...row }),
+    })
+  } catch {
+    /* mirror is best-effort; D1 is the source of truth */
+  }
+}
