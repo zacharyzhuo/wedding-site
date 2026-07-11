@@ -6,15 +6,7 @@
 // launch; this is the unprotected starter.
 
 import { useState } from 'react'
-
-// Same fixed set as the LIFF form, see comment in /liff/rsvp/page.tsx
-const DIET_OPTIONS = [
-  '無特殊需求',
-  '全素',
-  '蛋奶素',
-  '食物過敏（請於留言備註）',
-  '其他（請於留言備註）',
-] as const
+import { DIET_OPTIONS } from '@/lib/diet'
 
 export default function RsvpFallbackPage() {
   const [form, setForm] = useState({
@@ -34,10 +26,19 @@ export default function RsvpFallbackPage() {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
           source: 'fallback',
-          lineUserId: '',
-          ...form,
-          headcount: Number(form.headcount) || 1,
+          realName: form.name,
+          side: form.side,
+          relationship: form.relationship,
+          attending: form.attending,
+          adultCount: Number(form.headcount) || 1,
           childCount: Number(form.childCount) || 0,
+          // No child-seat question on this simplified fallback form —
+          // defaults to 0, which always satisfies the server's
+          // childSeatCount <= childCount check.
+          childSeatCount: 0,
+          leaderDiet: form.diet,
+          notes: '',
+          message: form.message,
         }),
       })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)

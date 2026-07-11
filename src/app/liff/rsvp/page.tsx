@@ -1,34 +1,33 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useLiffProfile } from '@/lib/liff'
+import { getLiffIdToken } from '@/lib/liff-token'
+import { DIET_OPTIONS } from '@/lib/diet'
+import { toSvgMarkup } from '@/lib/qr'
 
-// Field shape mirrors the Sheet's existing guest-list vocabulary so RSVP
-// responses reconcile cleanly with the draft list (see skill's
-// references/rsvp-forms.md + assets/templates/rsvp-schema.md).
+// Field shape follows the party-identity field model (§4.5): the leader
+// submits party-level fields (side/relationship/attending/counts/notes) plus
+// their own identity (realName/leaderDiet). The rest of the party joins
+// later via the share link this form returns — see joinUrl in ShareBlock.
 type FormState = {
+  realName: string
   side: '男方' | '女方' | ''
   relationship: '家長' | '親戚' | '朋友' | ''
   attending: '出席' | '不克出席' | ''
-  headcount: string  // keep as string for form input; coerce on submit
+  adultCount: string       // keep as string for form input; coerce on submit
   childCount: string
-  diet: string
+  childSeatCount: string
+  leaderDiet: string
+  notes: string
   message: string
 }
 
-// Fixed vocabulary so the value lands in the Sheet as a stable label;
-// avoids free-text variants like "全素"/"純素"/"vegan" that mean the same thing.
-const DIET_OPTIONS = [
-  '無特殊需求',
-  '全素',
-  '蛋奶素',
-  '食物過敏（請於留言備註）',
-  '其他（請於留言備註）',
-] as const
-
 const initial: FormState = {
+  realName: '',
   side: '', relationship: '', attending: '',
-  headcount: '1', childCount: '0', diet: '無特殊需求', message: '',
+  adultCount: '1', childCount: '0', childSeatCount: '0',
+  leaderDiet: '無特殊需求', notes: '', message: '',
 }
 
 export default function RsvpLiffPage() {
@@ -37,6 +36,7 @@ export default function RsvpLiffPage() {
   const [form, setForm] = useState<FormState>(initial)
   const [submitting, setSubmitting] = useState(false)
   const [done, setDone] = useState(false)
+  const [joinUrl, setJoinUrl] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   if (state.status === 'loading') {
@@ -49,10 +49,13 @@ export default function RsvpLiffPage() {
     </Centered>
   }
   if (done) {
-    return <Centered>
-      <h1 className="text-3xl">收到您的回覆 ❤</h1>
-      <p className="mt-4 text-ink/70">期待 2027/06/05 與您相見。</p>
-    </Centered>
+    return (
+      <main className="mx-auto max-w-md px-6 py-16 text-center">
+        <h1 className="text-3xl">收到您的回覆 ❤</h1>
+        <p className="mt-4 text-ink/70">期待 2027/06/05 與您相見。</p>
+        {joinUrl && <ShareBlock joinUrl={joinUrl} />}
+      </main>
+    )
   }
 
   const profile = state.profile
@@ -62,19 +65,22 @@ export default function RsvpLiffPage() {
     setError(null)
     setSubmitting(true)
     try {
+      const idToken = await getLiffIdToken()
+      if (!idToken) throw new Error('LINE 登入逾時，請重新進入。')
       const res = await fetch('/api/rsvp', {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: { 'content-type': 'application/json', 'x-line-id-token': idToken },
         body: JSON.stringify({
           source: 'liff',
-          lineUserId: profile.userId,
-          name: profile.displayName,
           ...form,
-          headcount: Number(form.headcount) || 1,
+          adultCount: Number(form.adultCount) || 1,
           childCount: Number(form.childCount) || 0,
+          childSeatCount: Number(form.childSeatCount) || 0,
         }),
       })
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const data = await res.json() as { ok?: boolean; joinUrl?: string; error?: string }
+      if (!res.ok || !data.ok) throw new Error(data.error ?? `HTTP ${res.status}`)
+      setJoinUrl(data.joinUrl ?? null)
       setDone(true)
     } catch (e) {
       setError(e instanceof Error ? e.message : '送出失敗，請稍後再試')
@@ -94,6 +100,14 @@ export default function RsvpLiffPage() {
       </header>
 
       <form onSubmit={onSubmit} className="space-y-5">
+        <Field label="你的真實姓名">
+          <input
+            type="text" required className="field-input"
+            value={form.realName}
+            onChange={e => setForm({ ...form, realName: e.target.value })}
+          />
+        </Field>
+
         <Field label="您是男方還是女方的賓客？">
           <Select
             value={form.side}
@@ -120,29 +134,52 @@ export default function RsvpLiffPage() {
 
         {form.attending === '出席' && (
           <>
-            <Field label="出席人數（含本人）">
+            <Field label="大人人數（含本人）">
               <input
                 type="number" min={1} className="field-input"
-                value={form.headcount}
-                onChange={e => setForm({ ...form, headcount: e.target.value })}
+                value={form.adultCount}
+                onChange={e => setForm({ ...form, adultCount: e.target.value })}
               />
             </Field>
-            <Field label="其中兒童人數（需兒童椅）">
+            <Field label="兒童人數">
               <input
                 type="number" min={0} className="field-input"
                 value={form.childCount}
-                onChange={e => setForm({ ...form, childCount: e.target.value })}
+                onChange={e => {
+                  const childCount = e.target.value
+                  // Keep the seat count from silently exceeding the new child
+                  // count (e.g. dropping childCount from 3 to 1 after having
+                  // set childSeatCount to 3).
+                  const seatCap = Number(childCount) || 0
+                  const childSeatCount = Math.min(Number(form.childSeatCount) || 0, seatCap).toString()
+                  setForm({ ...form, childCount, childSeatCount })
+                }}
               />
             </Field>
-            <Field label="飲食需求">
+            <Field label="其中需要兒童椅">
+              <input
+                type="number" min={0} max={Number(form.childCount) || 0} className="field-input"
+                value={form.childSeatCount}
+                onChange={e => setForm({ ...form, childSeatCount: e.target.value })}
+              />
+            </Field>
+            <Field label="你的飲食需求">
               <Select
-                value={form.diet}
-                onChange={v => setForm({ ...form, diet: v })}
+                value={form.leaderDiet}
+                onChange={v => setForm({ ...form, leaderDiet: v })}
                 options={[...DIET_OPTIONS]}
               />
             </Field>
           </>
         )}
+
+        <Field label="備註（代填不用 LINE 的人／兒童特殊需求）">
+          <textarea
+            rows={2} className="field-input"
+            value={form.notes}
+            onChange={e => setForm({ ...form, notes: e.target.value })}
+          />
+        </Field>
 
         <Field label="想對新人說的話">
           <textarea
@@ -156,13 +193,90 @@ export default function RsvpLiffPage() {
 
         <button
           type="submit"
-          disabled={submitting || !form.side || !form.relationship || !form.attending}
+          disabled={submitting || !form.realName || !form.side || !form.relationship || !form.attending}
           className="btn-primary w-full"
         >
           {submitting ? '送出中…' : '送出回覆'}
         </button>
       </form>
     </main>
+  )
+}
+
+// Shown once the leader's RSVP is recorded. joinUrl carries the party code;
+// sharing it (via LINE's native picker, a copied link, or the QR) is how the
+// rest of the party gets added without re-typing the leader's answers.
+function ShareBlock({ joinUrl }: { joinUrl: string }) {
+  const [qrSvg, setQrSvg] = useState<string | null>(null)
+  const [copied, setCopied] = useState(false)
+  const [canShare, setCanShare] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    toSvgMarkup(joinUrl)
+      .then(svg => { if (!cancelled) setQrSvg(svg) })
+      .catch(() => { /* QR is a convenience; link + copy still work without it */ })
+    return () => { cancelled = true }
+  }, [joinUrl])
+
+  useEffect(() => {
+    let cancelled = false
+    // shareTargetPicker only works inside the LINE in-app browser — hide the
+    // button rather than show one that silently does nothing when opened in
+    // an external browser.
+    import('@line/liff').then(({ default: liff }) => {
+      if (!cancelled) setCanShare(liff.isApiAvailable('shareTargetPicker'))
+    }).catch(() => { /* leave canShare false — link/QR still work */ })
+    return () => { cancelled = true }
+  }, [])
+
+  async function copyLink() {
+    try {
+      await navigator.clipboard.writeText(joinUrl)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    } catch {
+      // Clipboard API can be unavailable in some in-app webviews — the link
+      // text below is still visible for a manual copy.
+    }
+  }
+
+  async function share() {
+    try {
+      const liff = (await import('@line/liff')).default
+      await liff.shareTargetPicker([
+        { type: 'text', text: `一起參加卓育辰＆楊皖淩的婚禮吧！點連結登記出席：${joinUrl}` },
+      ])
+    } catch {
+      // User cancelled the picker — non-fatal, the link and QR below still work.
+    }
+  }
+
+  return (
+    <div className="mt-10 rounded-2xl border border-champagne bg-white/70 p-6">
+      <p className="text-ink/80">
+        把這個連結傳給同行的人，他們加入就完成登記
+      </p>
+      <p className="mt-3 break-all rounded-md bg-champagne/30 px-3 py-2 text-sm text-ink/70">
+        {joinUrl}
+      </p>
+      <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:justify-center">
+        <button type="button" className="btn-outline" onClick={copyLink}>
+          {copied ? '已複製' : '複製連結'}
+        </button>
+        {canShare && (
+          <button type="button" className="btn-primary" onClick={share}>
+            分享給同行的人
+          </button>
+        )}
+      </div>
+      {qrSvg && (
+        <div
+          className="mx-auto mt-6 h-40 w-40 [&>svg]:h-full [&>svg]:w-full"
+          dangerouslySetInnerHTML={{ __html: qrSvg }}
+        />
+      )}
+    </div>
   )
 }
 

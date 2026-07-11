@@ -174,8 +174,10 @@ In Pages → Settings → Environment variables (production):
 | Var | Value |
 |---|---|
 | `NEXT_PUBLIC_LIFF_ID_RSVP` / `_DANMAKU` / `_PHOTO` / `_ADMIN` | from step 5 |
+| `NEXT_PUBLIC_LIFF_ID_JOIN` | join LIFF id (party-identity share link/QR target) |
 | `NEXT_PUBLIC_LINE_OA_ADD_FRIEND_URL` | `https://line.me/R/ti/p/@160vcltf` |
 | `LINE_LOGIN_CHANNEL_ID` | LINE Login channel ID (server, secret) |
+| `LINE_LIFF_ID_JOIN` | same join LIFF id, server-side (builds `POST /api/rsvp`'s `joinUrl`) |
 | `ADMIN_LINE_USER_IDS` | comma-separated, from step 6 |
 | `SCREEN_TOKEN` | long random string (e.g. `openssl rand -hex 24`) |
 | `FORBIDDEN_WORDS` | comma-separated. Start with profanity + 前任名字 |
