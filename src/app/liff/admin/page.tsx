@@ -44,6 +44,11 @@ type RafflePrize = {
   quantity: number
   remaining: number
 }
+type UnidentifiedGuest = {
+  userId: string
+  displayName: string
+  avatarUrl: string | null
+}
 
 const POLL_MS = 5000
 
@@ -57,7 +62,7 @@ export default function AdminLiffPage() {
   const [danmaku, setDanmaku] = useState<DanmakuItem[]>([])
   const [photos, setPhotos] = useState<PhotoItem[]>([])
   const [filter, setFilter] = useState<'all' | 'pending'>('all')
-  const [tab, setTab] = useState<'danmaku' | 'photos' | 'raffle' | 'thankyou'>('danmaku')
+  const [tab, setTab] = useState<'danmaku' | 'photos' | 'raffle' | 'thankyou' | 'identity'>('danmaku')
   const [raffleTotal, setRaffleTotal] = useState(0)
   const [raffleMode, setRaffleMode] = useState<'on' | 'off'>('off')
   const [prizes, setPrizes] = useState<RafflePrize[]>([])
@@ -66,6 +71,10 @@ export default function AdminLiffPage() {
   const [newPrizeQty, setNewPrizeQty] = useState('1')
   const [drawing, setDrawing] = useState(false)
   const [raffleError, setRaffleError] = useState<string | null>(null)
+  const [unidentified, setUnidentified] = useState<UnidentifiedGuest[]>([])
+  const [identityDrafts, setIdentityDrafts] = useState<Record<string, { realName: string; partyId: string }>>({})
+  const [identitySaving, setIdentitySaving] = useState<string | null>(null)
+  const [identityError, setIdentityError] = useState<string | null>(null)
 
   const authedFetch = useCallback(async (path: string, init?: RequestInit) => {
     const idToken = await getLiffIdToken()
@@ -109,6 +118,15 @@ export default function AdminLiffPage() {
             setPrizes(rd.prizes)
             setDraws(rd.draws)
           }
+        }
+      } catch { /* next poll retries */ }
+      // Same treatment: identity list rides the same refresh cadence and
+      // must not blank the moderation feed if it fails.
+      try {
+        const idRes = await authedFetch('/api/admin/identity/list')
+        if (idRes.ok) {
+          const idData = await idRes.json() as { ok: boolean; unidentified: UnidentifiedGuest[] }
+          if (idData.ok) setUnidentified(idData.unidentified)
         }
       } catch { /* next poll retries */ }
     } catch (e) {
@@ -261,6 +279,34 @@ export default function AdminLiffPage() {
     if (!res || !res.ok) setMode(prev)
   }
 
+  function identityDraft(userId: string) {
+    return identityDrafts[userId] ?? { realName: '', partyId: '' }
+  }
+  function setIdentityDraft(userId: string, patch: Partial<{ realName: string; partyId: string }>) {
+    setIdentityDrafts(d => ({ ...d, [userId]: { ...identityDraft(userId), ...patch } }))
+  }
+  async function saveIdentity(userId: string) {
+    const draft = identityDraft(userId)
+    const realName = draft.realName.trim()
+    if (!realName) return
+    setIdentitySaving(userId)
+    setIdentityError(null)
+    try {
+      const res = await authedFetch('/api/admin/identity/set', {
+        method: 'POST',
+        body: JSON.stringify({ userId, realName, partyId: draft.partyId.trim() || undefined }),
+      })
+      const data = await res.json() as { ok?: boolean; error?: string }
+      if (!res.ok || !data.ok) throw new Error(data.error ?? `HTTP ${res.status}`)
+      setUnidentified(us => us.filter(u => u.userId !== userId))
+      setIdentityDrafts(d => Object.fromEntries(Object.entries(d).filter(([id]) => id !== userId)))
+    } catch (e) {
+      setIdentityError(e instanceof Error ? e.message : '儲存失敗')
+    } finally {
+      setIdentitySaving(null)
+    }
+  }
+
   if (state.status === 'loading' || authState === 'loading') {
     return <Centered><p className="text-ink/60">驗證中…</p></Centered>
   }
@@ -305,7 +351,7 @@ export default function AdminLiffPage() {
       </header>
 
       <nav className="mb-6 flex gap-2 border-b border-champagne pb-3 text-sm">
-        {([['danmaku', '彈幕'], ['photos', '照片'], ['raffle', '抽獎'], ['thankyou', '悄悄話']] as const).map(([key, label]) => (
+        {([['danmaku', '彈幕'], ['photos', '照片'], ['raffle', '抽獎'], ['thankyou', '悄悄話'], ['identity', '身分']] as const).map(([key, label]) => (
           <button
             key={key}
             className={`rounded-full px-4 py-1 ${tab === key ? 'bg-ink text-cream' : 'bg-white border border-champagne'}`}
@@ -313,6 +359,9 @@ export default function AdminLiffPage() {
           >
             {label}
             {key === 'danmaku' && danmaku.some(d => d.status === 'pending') && (
+              <span className="ml-1 text-amber-400">●</span>
+            )}
+            {key === 'identity' && unidentified.length > 0 && (
               <span className="ml-1 text-amber-400">●</span>
             )}
           </button>
@@ -495,6 +544,57 @@ export default function AdminLiffPage() {
           關閉時，賓客在聊天室送出「悄悄話」只會看到「婚禮當天再開放」的提示，看不到你們準備的卡片內容。
           打開後，所有人送出「悄悄話」就會立刻收到自己的專屬卡片。建議在婚禮當天想公開的時刻再打開。
         </p>
+      </section>
+      )}
+
+      {tab === 'identity' && (
+      <section>
+        <h2 className="mb-2 text-sm uppercase tracking-widest text-accent">未命名賓客</h2>
+        <p className="mb-4 text-xs leading-relaxed text-ink/50">
+          這些人只透過抽獎留下 LINE 資料，還沒有真實姓名。補上姓名（可選填團編號）方便對照名單與座位。
+        </p>
+        {identityError && <p className="mb-3 text-sm text-red-600">{identityError}</p>}
+        <ul className="space-y-2">
+          {unidentified.length === 0 && <li className="text-sm text-ink/50">目前沒有未命名的人。</li>}
+          {unidentified.map(u => {
+            const draft = identityDraft(u.userId)
+            const saving = identitySaving === u.userId
+            return (
+              <li key={u.userId} className="rounded-md border border-champagne bg-white p-3">
+                <div className="flex items-center gap-3">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  {u.avatarUrl
+                    ? <img src={u.avatarUrl} alt="" className="h-10 w-10 shrink-0 rounded-full object-cover" />
+                    : <div className="h-10 w-10 shrink-0 rounded-full bg-champagne" />}
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm text-ink/70">{u.displayName}</p>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      <input
+                        className="field-input min-w-0 flex-1"
+                        placeholder="真實姓名"
+                        value={draft.realName}
+                        onChange={e => setIdentityDraft(u.userId, { realName: e.target.value })}
+                        maxLength={40}
+                      />
+                      <input
+                        className="field-input w-28"
+                        placeholder="團編號（選填）"
+                        value={draft.partyId}
+                        onChange={e => setIdentityDraft(u.userId, { partyId: e.target.value })}
+                        maxLength={20}
+                      />
+                      <button
+                        className="btn-primary px-4 py-1 text-sm"
+                        disabled={saving || !draft.realName.trim()}
+                        onClick={() => saveIdentity(u.userId)}
+                      >{saving ? '儲存中…' : '儲存'}</button>
+                    </div>
+                  </div>
+                </div>
+              </li>
+            )
+          })}
+        </ul>
       </section>
       )}
 
