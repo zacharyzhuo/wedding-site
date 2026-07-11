@@ -37,7 +37,7 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
     throw e
   }
 
-  const [danmakuRes, photoRes, mode] = await Promise.all([
+  const [danmakuRes, photoRes, mode, thankyouRow] = await Promise.all([
     env.DB
       .prepare(
         `SELECT id, display_name, message, photo_id, status, created_at
@@ -53,6 +53,9 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
          LIMIT 50`
       ).all<PhotoRow>(),
     readModerationMode(env.DB),
+    env.DB
+      .prepare(`SELECT value FROM settings WHERE key = 'thankyou_mode'`)
+      .first<{ value: string }>(),
   ])
 
   const photoRows = photoRes.results ?? []
@@ -76,5 +79,9 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
     createdAt: row.created_at,
   }))
 
-  return json(200, { ok: true, mode, danmaku, photos })
+  // 悄悄話 gate: guests only see their thank-you card once the couple flips
+  // this on in the admin (default off, so cards stay hidden until the reveal).
+  const thankyouMode = thankyouRow?.value === 'on' ? 'on' : 'off'
+
+  return json(200, { ok: true, mode, thankyouMode, danmaku, photos })
 }

@@ -28,7 +28,19 @@ interface LineEvent {
   message?: { type?: string; text?: string }
 }
 
-const KEYWORD = '悄悄話'
+const KEYWORD_THANKYOU = '悄悄話'
+const KEYWORD_SEAT = '座位'
+
+// Shown when a guest asks for 悄悄話 before the couple opens it in the admin.
+const THANKYOU_CLOSED_MESSAGE =
+  '悄悄話還沒開放喔，婚禮當天再回來看看我們想對你說的話 ❤'
+// 座位 lookup has no code yet — honest placeholder so the menu tile isn't dead.
+const SEAT_PLACEHOLDER_MESSAGE =
+  '座位查詢會在婚禮當天開放，現場再麻煩你點開看看你的位子 🪑'
+
+function textMessage(text: string) {
+  return { type: 'text', text }
+}
 
 async function signatureValid(raw: string, secret: string, signature: string): Promise<boolean> {
   const key = await crypto.subtle.importKey(
@@ -104,22 +116,37 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
     return err(400, 'invalid json')
   }
 
+  // 悄悄話 gate — one settings read for the whole batch.
+  const thankyouRow = await env.DB
+    .prepare(`SELECT value FROM settings WHERE key = 'thankyou_mode'`)
+    .first<{ value: string }>()
+  const thankyouOpen = thankyouRow?.value === 'on'
+
   for (const ev of body.events ?? []) {
     if (ev.type !== 'message' || ev.message?.type !== 'text' || !ev.replyToken) continue
     const text = (ev.message.text ?? '').normalize('NFKC').trim()
-    if (!text.includes(KEYWORD)) continue
 
-    const userId = ev.source?.userId
-    const card = userId
-      ? await env.DB
-          .prepare(`SELECT guest_name, message FROM thankyou_cards WHERE line_user_id = ?`)
-          .bind(userId)
-          .first<{ guest_name: string; message: string }>()
-      : null
-
-    const reply = card
-      ? flexCard(card.guest_name, card.message)
-      : flexCard(null, GENERIC_MESSAGE)
+    let reply: object | null = null
+    if (text.includes(KEYWORD_THANKYOU)) {
+      if (!thankyouOpen) {
+        // Gated: reveal not opened yet — reply a teaser, never the card.
+        reply = textMessage(THANKYOU_CLOSED_MESSAGE)
+      } else {
+        const userId = ev.source?.userId
+        const card = userId
+          ? await env.DB
+              .prepare(`SELECT guest_name, message FROM thankyou_cards WHERE line_user_id = ?`)
+              .bind(userId)
+              .first<{ guest_name: string; message: string }>()
+          : null
+        reply = card
+          ? flexCard(card.guest_name, card.message)
+          : flexCard(null, GENERIC_MESSAGE)
+      }
+    } else if (text.includes(KEYWORD_SEAT)) {
+      reply = textMessage(SEAT_PLACEHOLDER_MESSAGE)
+    }
+    if (!reply) continue
 
     const res = await fetch('https://api.line.me/v2/bot/message/reply', {
       method: 'POST',

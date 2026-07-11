@@ -53,10 +53,11 @@ export default function AdminLiffPage() {
   const [authState, setAuthState] = useState<'loading' | 'ok' | 'forbidden' | 'error'>('loading')
   const [authMessage, setAuthMessage] = useState<string | null>(null)
   const [mode, setMode] = useState<'auto' | 'manual'>('auto')
+  const [thankyouMode, setThankyouMode] = useState<'on' | 'off'>('off')
   const [danmaku, setDanmaku] = useState<DanmakuItem[]>([])
   const [photos, setPhotos] = useState<PhotoItem[]>([])
   const [filter, setFilter] = useState<'all' | 'pending'>('all')
-  const [tab, setTab] = useState<'danmaku' | 'photos' | 'raffle'>('danmaku')
+  const [tab, setTab] = useState<'danmaku' | 'photos' | 'raffle' | 'thankyou'>('danmaku')
   const [raffleTotal, setRaffleTotal] = useState(0)
   const [raffleMode, setRaffleMode] = useState<'on' | 'off'>('off')
   const [prizes, setPrizes] = useState<RafflePrize[]>([])
@@ -85,10 +86,11 @@ export default function AdminLiffPage() {
       if (res.status === 403) { setAuthState('forbidden'); return }
       if (!res.ok) { setAuthState('error'); setAuthMessage(`HTTP ${res.status}`); return }
       const data = await res.json() as {
-        ok: boolean; mode: 'auto' | 'manual'
+        ok: boolean; mode: 'auto' | 'manual'; thankyouMode?: 'on' | 'off'
         danmaku: DanmakuItem[]; photos: PhotoItem[]
       }
       setMode(data.mode)
+      setThankyouMode(data.thankyouMode ?? 'off')
       setDanmaku(data.danmaku)
       setPhotos(data.photos)
       setAuthState('ok')
@@ -213,6 +215,16 @@ export default function AdminLiffPage() {
     if (!res || !res.ok) setRaffleMode(prev)
   }
 
+  async function toggleThankyouMode() {
+    const prev = thankyouMode
+    const next = prev === 'on' ? 'off' : 'on'
+    setThankyouMode(next)
+    const res = await authedFetch('/api/admin/thankyou/mode', {
+      method: 'POST', body: JSON.stringify({ mode: next }),
+    }).catch(() => null)
+    if (!res || !res.ok) setThankyouMode(prev)
+  }
+
   async function addPrize() {
     const name = newPrizeName.trim()
     const quantity = Number(newPrizeQty)
@@ -293,7 +305,7 @@ export default function AdminLiffPage() {
       </header>
 
       <nav className="mb-6 flex gap-2 border-b border-champagne pb-3 text-sm">
-        {([['danmaku', '彈幕'], ['photos', '照片'], ['raffle', '抽獎']] as const).map(([key, label]) => (
+        {([['danmaku', '彈幕'], ['photos', '照片'], ['raffle', '抽獎'], ['thankyou', '悄悄話']] as const).map(([key, label]) => (
           <button
             key={key}
             className={`rounded-full px-4 py-1 ${tab === key ? 'bg-ink text-cream' : 'bg-white border border-champagne'}`}
@@ -463,6 +475,26 @@ export default function AdminLiffPage() {
             </ul>
           </>
         )}
+      </section>
+      )}
+
+      {tab === 'thankyou' && (
+      <section>
+        <div className="mb-4 flex items-center justify-between">
+          <p className="text-sm text-ink/60">悄悄話（賓客的專屬感謝卡）</p>
+          <button
+            className={`rounded-full px-4 py-1 text-sm font-medium ${
+              thankyouMode === 'on' ? 'bg-emerald-600 text-cream' : 'bg-white border border-champagne text-ink/70'
+            }`}
+            onClick={toggleThankyouMode}
+          >
+            {thankyouMode === 'on' ? '✓ 已開放' : '🔒 未開放'}
+          </button>
+        </div>
+        <p className="text-xs leading-relaxed text-ink/50">
+          關閉時，賓客在聊天室送出「悄悄話」只會看到「婚禮當天再開放」的提示，看不到你們準備的卡片內容。
+          打開後，所有人送出「悄悄話」就會立刻收到自己的專屬卡片。建議在婚禮當天想公開的時刻再打開。
+        </p>
       </section>
       )}
 
