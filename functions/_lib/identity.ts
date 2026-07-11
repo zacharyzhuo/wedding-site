@@ -38,7 +38,7 @@ export function generatePartyCode(): string {
   return out
 }
 
-type IncomingIdentity = Partial<IdentityRow> & {
+export type IncomingIdentity = Partial<IdentityRow> & {
   line_user_id: string
   real_name: string
   role: Role
@@ -75,6 +75,11 @@ export function mergeIdentity(
     // refresh LINE snapshots when provided
     display_name: incoming.display_name ?? existing.display_name,
     avatar_url: incoming.avatar_url ?? existing.avatar_url,
+    // role: never demote a leader; otherwise adopt incoming.role so a solo who
+    // later joins a party becomes a member. source is left as existing (via
+    // spread) because real_name is not overwritten, so provenance stays with
+    // the name's first source.
+    role: existing.role === 'leader' ? 'leader' : incoming.role,
     updated_at: now,
   }
 }

@@ -37,4 +37,32 @@ describe('mergeIdentity', () => {
     expect(mergeIdentity(existing, { line_user_id: 'U1', real_name: '王小明', role: 'member', source: 'join' }, 200).diet).toBe('蛋奶素')
     expect(mergeIdentity(existing, { line_user_id: 'U1', real_name: '王小明', role: 'member', source: 'join', diet: '全素' }, 200).diet).toBe('全素')
   })
+  it('diet 傳空字串 → 保留原值', () => {
+    const existing: IdentityRow = { line_user_id: 'U1', real_name: '王小明', diet: '蛋奶素', party_id: 'P1', role: 'member', display_name: null, avatar_url: null, source: 'join', created_at: 50, updated_at: 50 }
+    const r = mergeIdentity(existing, { line_user_id: 'U1', real_name: '王小明', role: 'member', source: 'join', diet: '' }, 200)
+    expect(r.diet).toBe('蛋奶素')
+  })
+  it('solo 加入 party 後 role 變成 member', () => {
+    const existing: IdentityRow = { line_user_id: 'U1', real_name: '王小明', diet: null, party_id: null, role: 'solo', display_name: null, avatar_url: null, source: 'rsvp', created_at: 50, updated_at: 50 }
+    const r = mergeIdentity(existing, { line_user_id: 'U1', real_name: '王小明', role: 'member', source: 'join', party_id: 'P9' }, 200)
+    expect(r.role).toBe('member')
+    expect(r.party_id).toBe('P9')
+  })
+  it('leader 不會被降級', () => {
+    const existing: IdentityRow = { line_user_id: 'U1', real_name: '王小明', diet: null, party_id: 'P1', role: 'leader', display_name: null, avatar_url: null, source: 'rsvp', created_at: 50, updated_at: 50 }
+    const r = mergeIdentity(existing, { line_user_id: 'U1', real_name: '王小明', role: 'member', source: 'join' }, 200)
+    expect(r.role).toBe('leader')
+  })
+  it('display_name/avatar_url:incoming 有值就更新', () => {
+    const existing: IdentityRow = { line_user_id: 'U1', real_name: '王小明', diet: null, party_id: null, role: 'member', display_name: null, avatar_url: null, source: 'join', created_at: 50, updated_at: 50 }
+    const r = mergeIdentity(existing, { line_user_id: 'U1', real_name: '王小明', role: 'member', source: 'join', display_name: '新暱稱', avatar_url: 'http://a/x.jpg' }, 200)
+    expect(r.display_name).toBe('新暱稱')
+    expect(r.avatar_url).toBe('http://a/x.jpg')
+  })
+  it('display_name/avatar_url:incoming 沒給就保留原值', () => {
+    const existing: IdentityRow = { line_user_id: 'U1', real_name: '王小明', diet: null, party_id: null, role: 'member', display_name: '舊', avatar_url: 'http://old', source: 'join', created_at: 50, updated_at: 50 }
+    const r = mergeIdentity(existing, { line_user_id: 'U1', real_name: '王小明', role: 'member', source: 'join' }, 200)
+    expect(r.display_name).toBe('舊')
+    expect(r.avatar_url).toBe('http://old')
+  })
 })
