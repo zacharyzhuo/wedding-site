@@ -17,7 +17,28 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
     const p = await getParty(env.DB, id.party_id)
     if (p) {
       const leader = await getIdentity(env.DB, p.leader_user_id)
-      party = { partyId: p.party_id, leaderName: leader?.real_name ?? null }
+      party = { partyId: p.party_id, leaderName: leader?.real_name ?? null } as Record<string, unknown>
+      // For the leader of this party, surface the full record (to pre-fill an
+      // edit of their RSVP) plus how many of the expected adults have their
+      // own identity yet (leader + members who joined) — the "3 / 4" progress.
+      if (id.role === 'leader') {
+        const countRow = await env.DB
+          .prepare(`SELECT COUNT(*) AS n FROM guest_identity WHERE party_id = ?`)
+          .bind(p.party_id)
+          .first<{ n: number }>()
+        party = {
+          ...party,
+          side: p.side,
+          relationship: p.relationship,
+          attending: p.attending,
+          adultCount: p.adult_count,
+          childCount: p.child_count,
+          childSeatCount: p.child_seat_count,
+          notes: p.notes,
+          message: p.message,
+          identifiedCount: countRow?.n ?? 0,
+        }
+      }
     }
   }
   return ok({ identified: true, realName: id.real_name, diet: id.diet, role: id.role, party })

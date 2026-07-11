@@ -165,6 +165,7 @@ async function upsertLeaderParty(
     child_count: body.childCount,
     child_seat_count: body.childSeatCount,
     notes: body.notes?.trim() ? body.notes : null,
+    message: body.message?.trim() ? body.message : null,
   }
   await createParty(db, partyRow, now)
 

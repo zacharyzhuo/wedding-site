@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useLiffProfile } from '@/lib/liff'
 import { getLiffIdToken } from '@/lib/liff-token'
 import { DIET_OPTIONS } from '@/lib/diet'
@@ -34,8 +34,22 @@ type MeResponse = {
   ok?: boolean
   identified?: boolean
   role?: 'leader' | 'member' | 'solo' | null
+  realName?: string | null
   diet?: string | null
-  party?: { partyId: string; leaderName: string | null } | null
+  party?: {
+    partyId: string
+    leaderName: string | null
+    // Present only for the leader of this party (from /api/identity/me):
+    side?: string
+    relationship?: string
+    attending?: string
+    adultCount?: number
+    childCount?: number
+    childSeatCount?: number
+    notes?: string | null
+    message?: string | null
+    identifiedCount?: number
+  } | null
   error?: string
 }
 
@@ -54,8 +68,6 @@ export default function RsvpLiffPage() {
   const state = useLiffProfile(liffId)
   const [form, setForm] = useState<FormState>(initial)
   const [submitting, setSubmitting] = useState(false)
-  const [done, setDone] = useState(false)
-  const [joinUrl, setJoinUrl] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   const [meCheck, setMeCheck] = useState<MeCheck>({ status: 'checking' })
@@ -63,6 +75,9 @@ export default function RsvpLiffPage() {
   // A leader who already submitted lands on the "here's your link again" view;
   // this lets them opt back into the form to revise their answers.
   const [forceForm, setForceForm] = useState(false)
+  // The leader's own submitted answers, so tapping "edit" pre-fills the form
+  // instead of making them re-type everything.
+  const [leaderPrefill, setLeaderPrefill] = useState<FormState | null>(null)
 
   useEffect(() => {
     if (state.status !== 'ready') return
@@ -80,9 +95,23 @@ export default function RsvpLiffPage() {
         } else if (data.role === 'leader' && data.party?.partyId) {
           // Leader already created their party — re-opening RSVP should surface
           // the share link again, not a blank form. Build the join URL the same
-          // way /api/rsvp does (join LIFF id + party code).
+          // way /api/rsvp does (join LIFF id + party code), and stash their
+          // answers so an edit pre-fills the form.
           const joinLiffId = process.env.NEXT_PUBLIC_LIFF_ID_JOIN
-          setMeCheck({ status: 'leader-done', joinUrl: `https://liff.line.me/${joinLiffId}?party=${data.party.partyId}` })
+          const p = data.party
+          setLeaderPrefill({
+            realName: data.realName ?? '',
+            side: (p.side as FormState['side']) ?? '',
+            relationship: (p.relationship as FormState['relationship']) ?? '',
+            attending: (p.attending as FormState['attending']) ?? '',
+            adultCount: String(p.adultCount ?? 1),
+            childCount: String(p.childCount ?? 0),
+            childSeatCount: String(p.childSeatCount ?? 0),
+            leaderDiet: data.diet || '無特殊需求',
+            notes: p.notes ?? '',
+            message: p.message ?? '',
+          })
+          setMeCheck({ status: 'leader-done', joinUrl: `https://liff.line.me/${joinLiffId}?party=${p.partyId}` })
         } else {
           setMeCheck({ status: 'leader-form' })
         }
@@ -102,15 +131,6 @@ export default function RsvpLiffPage() {
       <p className="text-sm text-ink/50 mt-2">{state.message}</p>
     </Centered>
   }
-  if (done) {
-    return (
-      <main className="mx-auto max-w-md px-6 py-16 text-center">
-        <h1 className="text-3xl">收到您的回覆 ❤</h1>
-        <p className="mt-4 text-ink/70">期待 2027/06/05 與您相見。</p>
-        {joinUrl && <ShareBlock joinUrl={joinUrl} />}
-      </main>
-    )
-  }
   if (meCheckError) {
     return <Centered>
       <p className="text-ink/80">載入失敗</p>
@@ -124,7 +144,12 @@ export default function RsvpLiffPage() {
     return <MemberDedupView leaderName={meCheck.leaderName} initialDiet={meCheck.diet} />
   }
   if (meCheck.status === 'leader-done' && !forceForm) {
-    return <LeaderDoneView joinUrl={meCheck.joinUrl} onEdit={() => setForceForm(true)} />
+    return (
+      <LeaderDoneView
+        joinUrl={meCheck.joinUrl}
+        onEdit={() => { if (leaderPrefill) setForm(leaderPrefill); setForceForm(true) }}
+      />
+    )
   }
 
   const profile = state.profile
@@ -149,8 +174,11 @@ export default function RsvpLiffPage() {
       })
       const data = await res.json() as { ok?: boolean; joinUrl?: string; error?: string }
       if (!res.ok || !data.ok) throw new Error(data.error ?? `HTTP ${res.status}`)
-      setJoinUrl(data.joinUrl ?? null)
-      setDone(true)
+      // Route straight to the leader "done" view (share link + live progress);
+      // remember what was just submitted so a follow-up edit pre-fills.
+      setLeaderPrefill(form)
+      setForceForm(false)
+      setMeCheck({ status: 'leader-done', joinUrl: data.joinUrl ?? '' })
     } catch (e) {
       setError(e instanceof Error ? e.message : '送出失敗，請稍後再試')
     } finally {
@@ -342,10 +370,53 @@ function MemberDedupView({
 // Shown to a leader who has already submitted (re-opening RSVP), so their
 // share link is one tap away instead of buried behind re-filling the form.
 function LeaderDoneView({ joinUrl, onEdit }: { joinUrl: string; onEdit: () => void }) {
+  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null)
+  const [refreshing, setRefreshing] = useState(false)
+
+  const loadProgress = useCallback(async () => {
+    setRefreshing(true)
+    try {
+      const idToken = await getLiffIdToken()
+      if (!idToken) return
+      const res = await fetch('/api/identity/me', { headers: { 'x-line-id-token': idToken } })
+      const data = await res.json() as MeResponse
+      if (res.ok && data.ok && data.party?.adultCount != null) {
+        setProgress({ done: data.party.identifiedCount ?? 1, total: data.party.adultCount })
+      }
+    } catch {
+      // progress is a convenience; the share link below works regardless
+    } finally {
+      setRefreshing(false)
+    }
+  }, [])
+
+  useEffect(() => { loadProgress() }, [loadProgress])
+
   return (
     <main className="mx-auto max-w-md px-6 py-16 text-center">
-      <h1 className="text-2xl">你已經回覆過了 ❤</h1>
+      <h1 className="text-2xl">你的回覆已送出 ❤</h1>
       <p className="mt-4 text-ink/70">把下面的連結傳給同行的人，他們加入就完成登記。</p>
+
+      {progress && (
+        <div className="mt-6 rounded-2xl border border-champagne bg-white/70 p-5">
+          <p className="text-sm text-ink/60">同行大人 LINE 登記進度</p>
+          <p className="mt-1 font-serif text-4xl text-ink">
+            {progress.done}<span className="mx-1 text-ink/30">/</span>{progress.total}
+          </p>
+          <p className="mt-2 text-xs leading-relaxed text-ink/45">
+            不用 LINE 的長輩由你在備註代填、不會自己登記，所以這裡可能不會填滿。
+          </p>
+          <button
+            type="button"
+            className="mt-3 text-xs text-accent underline underline-offset-4 disabled:opacity-50"
+            onClick={loadProgress}
+            disabled={refreshing}
+          >
+            {refreshing ? '更新中…' : '重新整理進度'}
+          </button>
+        </div>
+      )}
+
       <ShareBlock joinUrl={joinUrl} />
       <button type="button" className="btn-outline mt-6" onClick={onEdit}>
         需要修改回覆？重新填寫

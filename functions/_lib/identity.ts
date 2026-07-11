@@ -24,6 +24,7 @@ export interface PartyRow {
   child_count: number
   child_seat_count: number
   notes: string | null
+  message: string | null
   created_at: number
   updated_at: number
 }
@@ -115,14 +116,15 @@ export async function createParty(
 ): Promise<void> {
   await db.prepare(
     `INSERT INTO party
-       (party_id, leader_user_id, side, relationship, attending, adult_count, child_count, child_seat_count, notes, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       (party_id, leader_user_id, side, relationship, attending, adult_count, child_count, child_seat_count, notes, message, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(party_id) DO UPDATE SET
        side=excluded.side, relationship=excluded.relationship, attending=excluded.attending,
        adult_count=excluded.adult_count, child_count=excluded.child_count,
-       child_seat_count=excluded.child_seat_count, notes=excluded.notes, updated_at=excluded.updated_at`
+       child_seat_count=excluded.child_seat_count, notes=excluded.notes, message=excluded.message,
+       updated_at=excluded.updated_at`
   ).bind(p.party_id, p.leader_user_id, p.side, p.relationship, p.attending,
-         p.adult_count, p.child_count, p.child_seat_count, p.notes, now, now).run()
+         p.adult_count, p.child_count, p.child_seat_count, p.notes, p.message, now, now).run()
 }
 
 // Fire-and-forget-ish mirror of a D1 identity/party row into the Sheet.
