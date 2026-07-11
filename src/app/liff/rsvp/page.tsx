@@ -30,6 +30,24 @@ const initial: FormState = {
   leaderDiet: '無特殊需求', notes: '', message: '',
 }
 
+type MeResponse = {
+  ok?: boolean
+  identified?: boolean
+  role?: 'leader' | 'member' | 'solo' | null
+  diet?: string | null
+  party?: { partyId: string; leaderName: string | null } | null
+  error?: string
+}
+
+// A party MEMBER shouldn't see the leader form at all — submitting it would
+// wrongly promote them via mergeIdentity's role-adoption rule (see
+// _lib/identity.ts), detaching them from their real party. 'checking' guards
+// against a flash of the leader form before /api/identity/me resolves.
+type MeCheck =
+  | { status: 'checking' }
+  | { status: 'leader-form' }
+  | { status: 'member'; leaderName: string | null; diet: string | null }
+
 export default function RsvpLiffPage() {
   const liffId = process.env.NEXT_PUBLIC_LIFF_ID_RSVP
   const state = useLiffProfile(liffId)
@@ -38,6 +56,32 @@ export default function RsvpLiffPage() {
   const [done, setDone] = useState(false)
   const [joinUrl, setJoinUrl] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+
+  const [meCheck, setMeCheck] = useState<MeCheck>({ status: 'checking' })
+  const [meCheckError, setMeCheckError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (state.status !== 'ready') return
+    let cancelled = false
+    ;(async () => {
+      try {
+        const idToken = await getLiffIdToken()
+        if (!idToken) throw new Error('LINE 登入逾時，請重新進入。')
+        const res = await fetch('/api/identity/me', { headers: { 'x-line-id-token': idToken } })
+        const data = await res.json() as MeResponse
+        if (!res.ok || !data.ok) throw new Error(data.error ?? `HTTP ${res.status}`)
+        if (cancelled) return
+        if (data.role === 'member') {
+          setMeCheck({ status: 'member', leaderName: data.party?.leaderName ?? null, diet: data.diet ?? null })
+        } else {
+          setMeCheck({ status: 'leader-form' })
+        }
+      } catch (e) {
+        if (!cancelled) setMeCheckError(e instanceof Error ? e.message : '載入失敗，請稍後再試')
+      }
+    })()
+    return () => { cancelled = true }
+  }, [state.status])
 
   if (state.status === 'loading') {
     return <Centered><p className="text-ink/60">載入中…</p></Centered>
@@ -56,6 +100,18 @@ export default function RsvpLiffPage() {
         {joinUrl && <ShareBlock joinUrl={joinUrl} />}
       </main>
     )
+  }
+  if (meCheckError) {
+    return <Centered>
+      <p className="text-ink/80">載入失敗</p>
+      <p className="text-sm text-ink/50 mt-2">{meCheckError}</p>
+    </Centered>
+  }
+  if (meCheck.status === 'checking') {
+    return <Centered><p className="text-ink/60">確認身分中…</p></Centered>
+  }
+  if (meCheck.status === 'member') {
+    return <MemberDedupView leaderName={meCheck.leaderName} initialDiet={meCheck.diet} />
   }
 
   const profile = state.profile
@@ -203,6 +259,66 @@ export default function RsvpLiffPage() {
   )
 }
 
+// Shown to a party MEMBER instead of the leader form (see MeCheck above):
+// the leader already answered for the whole party, so all this guest needs
+// is a way to keep their own diet up to date.
+function MemberDedupView({
+  leaderName, initialDiet,
+}: { leaderName: string | null; initialDiet: string | null }) {
+  const validInitialDiet = initialDiet && (DIET_OPTIONS as readonly string[]).includes(initialDiet)
+    ? initialDiet
+    : DIET_OPTIONS[0]
+  const [diet, setDiet] = useState(validInitialDiet)
+  const [submitting, setSubmitting] = useState(false)
+  const [savedMsg, setSavedMsg] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  async function onSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    setError(null)
+    setSavedMsg(null)
+    setSubmitting(true)
+    try {
+      const idToken = await getLiffIdToken()
+      if (!idToken) throw new Error('LINE 登入逾時，請重新進入。')
+      const res = await fetch('/api/party/member-diet', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-line-id-token': idToken },
+        body: JSON.stringify({ diet }),
+      })
+      const data = await res.json() as { ok?: boolean; diet?: string; error?: string }
+      if (!res.ok || !data.ok) throw new Error(data.error ?? `HTTP ${res.status}`)
+      setSavedMsg('已更新你的飲食需求 ❤')
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '送出失敗，請稍後再試')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <main className="mx-auto max-w-md px-6 py-16 text-center">
+      <h1 className="text-2xl">
+        你是{leaderName ?? '對方'}那一團，團長已回覆出席 ❤
+      </h1>
+      <p className="mt-4 text-ink/70">期待 2027/06/05 與您相見。</p>
+
+      <form onSubmit={onSubmit} className="mt-10 space-y-5 text-left">
+        <Field label="更新我的飲食需求">
+          <Select value={diet} onChange={setDiet} options={[...DIET_OPTIONS]} includeBlank={false} />
+        </Field>
+
+        {error && <p className="text-red-600 text-sm">{error}</p>}
+        {savedMsg && <p className="text-sm text-ink/70">{savedMsg}</p>}
+
+        <button type="submit" disabled={submitting} className="btn-primary w-full">
+          {submitting ? '送出中…' : '更新'}
+        </button>
+      </form>
+    </main>
+  )
+}
+
 // Shown once the leader's RSVP is recorded. joinUrl carries the party code;
 // sharing it (via LINE's native picker, a copied link, or the QR) is how the
 // rest of the party gets added without re-typing the leader's answers.
@@ -290,15 +406,15 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 }
 
 function Select({
-  value, onChange, options,
-}: { value: string; onChange: (v: string) => void; options: string[] }) {
+  value, onChange, options, includeBlank = true,
+}: { value: string; onChange: (v: string) => void; options: string[]; includeBlank?: boolean }) {
   return (
     <select
       className="field-input"
       value={value}
       onChange={e => onChange(e.target.value)}
     >
-      <option value="">請選擇</option>
+      {includeBlank && <option value="">請選擇</option>}
       {options.map(o => <option key={o} value={o}>{o}</option>)}
     </select>
   )

@@ -10,7 +10,7 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
   catch (e) { if (e instanceof LiffAuthError) return err(e.status, e.message); throw e }
 
   const id = await getIdentity(env.DB, user.userId)
-  if (!id) return ok({ identified: false, realName: null, diet: null, party: null })
+  if (!id) return ok({ identified: false, realName: null, diet: null, role: null, party: null })
 
   let party = null
   if (id.party_id) {
@@ -20,5 +20,5 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
       party = { partyId: p.party_id, leaderName: leader?.real_name ?? null }
     }
   }
-  return ok({ identified: true, realName: id.real_name, diet: id.diet, party })
+  return ok({ identified: true, realName: id.real_name, diet: id.diet, role: id.role, party })
 }
