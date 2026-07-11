@@ -46,6 +46,7 @@ type MeResponse = {
 type MeCheck =
   | { status: 'checking' }
   | { status: 'leader-form' }
+  | { status: 'leader-done'; joinUrl: string }
   | { status: 'member'; leaderName: string | null; diet: string | null }
 
 export default function RsvpLiffPage() {
@@ -59,6 +60,9 @@ export default function RsvpLiffPage() {
 
   const [meCheck, setMeCheck] = useState<MeCheck>({ status: 'checking' })
   const [meCheckError, setMeCheckError] = useState<string | null>(null)
+  // A leader who already submitted lands on the "here's your link again" view;
+  // this lets them opt back into the form to revise their answers.
+  const [forceForm, setForceForm] = useState(false)
 
   useEffect(() => {
     if (state.status !== 'ready') return
@@ -73,6 +77,12 @@ export default function RsvpLiffPage() {
         if (cancelled) return
         if (data.role === 'member') {
           setMeCheck({ status: 'member', leaderName: data.party?.leaderName ?? null, diet: data.diet ?? null })
+        } else if (data.role === 'leader' && data.party?.partyId) {
+          // Leader already created their party — re-opening RSVP should surface
+          // the share link again, not a blank form. Build the join URL the same
+          // way /api/rsvp does (join LIFF id + party code).
+          const joinLiffId = process.env.NEXT_PUBLIC_LIFF_ID_JOIN
+          setMeCheck({ status: 'leader-done', joinUrl: `https://liff.line.me/${joinLiffId}?party=${data.party.partyId}` })
         } else {
           setMeCheck({ status: 'leader-form' })
         }
@@ -112,6 +122,9 @@ export default function RsvpLiffPage() {
   }
   if (meCheck.status === 'member') {
     return <MemberDedupView leaderName={meCheck.leaderName} initialDiet={meCheck.diet} />
+  }
+  if (meCheck.status === 'leader-done' && !forceForm) {
+    return <LeaderDoneView joinUrl={meCheck.joinUrl} onEdit={() => setForceForm(true)} />
   }
 
   const profile = state.profile
@@ -229,9 +242,13 @@ export default function RsvpLiffPage() {
           </>
         )}
 
-        <Field label="備註（代填不用 LINE 的人／兒童特殊需求）">
+        <Field
+          label="備註（幫不用 LINE 的同行者代填）"
+          hint="會用 LINE 的大人，等一下把你拿到的連結傳給他，讓他自己加入就好。這欄只填「不會用 LINE、需要你代填」的人（例如長輩、小孩）：他們的姓名、素食／過敏、兒童餐或兒童椅需求。"
+        >
           <textarea
-            rows={2} className="field-input"
+            rows={3} className="field-input"
+            placeholder="例：我爸媽兩位不用 LINE，都吃素；小孩 1 位要兒童餐 + 兒童椅"
             value={form.notes}
             onChange={e => setForm({ ...form, notes: e.target.value })}
           />
@@ -322,10 +339,24 @@ function MemberDedupView({
 // Shown once the leader's RSVP is recorded. joinUrl carries the party code;
 // sharing it (via LINE's native picker, a copied link, or the QR) is how the
 // rest of the party gets added without re-typing the leader's answers.
+// Shown to a leader who has already submitted (re-opening RSVP), so their
+// share link is one tap away instead of buried behind re-filling the form.
+function LeaderDoneView({ joinUrl, onEdit }: { joinUrl: string; onEdit: () => void }) {
+  return (
+    <main className="mx-auto max-w-md px-6 py-16 text-center">
+      <h1 className="text-2xl">你已經回覆過了 ❤</h1>
+      <p className="mt-4 text-ink/70">把下面的連結傳給同行的人，他們加入就完成登記。</p>
+      <ShareBlock joinUrl={joinUrl} />
+      <button type="button" className="btn-outline mt-6" onClick={onEdit}>
+        需要修改回覆？重新填寫
+      </button>
+    </main>
+  )
+}
+
 function ShareBlock({ joinUrl }: { joinUrl: string }) {
   const [qrSvg, setQrSvg] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
-  const [canShare, setCanShare] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -334,17 +365,6 @@ function ShareBlock({ joinUrl }: { joinUrl: string }) {
       .catch(() => { /* QR is a convenience; link + copy still work without it */ })
     return () => { cancelled = true }
   }, [joinUrl])
-
-  useEffect(() => {
-    let cancelled = false
-    // shareTargetPicker only works inside the LINE in-app browser — hide the
-    // button rather than show one that silently does nothing when opened in
-    // an external browser.
-    import('@line/liff').then(({ default: liff }) => {
-      if (!cancelled) setCanShare(liff.isApiAvailable('shareTargetPicker'))
-    }).catch(() => { /* leave canShare false — link/QR still work */ })
-    return () => { cancelled = true }
-  }, [])
 
   async function copyLink() {
     try {
@@ -357,15 +377,25 @@ function ShareBlock({ joinUrl }: { joinUrl: string }) {
     }
   }
 
+  // Share cascade: LINE's own picker (best inside LINE — pick a LINE contact
+  // and send in one step) → the OS native share sheet (which also routes to
+  // LINE) → copy as a last resort. Always shown, since there's always a path.
   async function share() {
+    const text = `一起參加卓育辰＆楊皖淩的婚禮吧！點連結登記出席：${joinUrl}`
     try {
       const liff = (await import('@line/liff')).default
-      await liff.shareTargetPicker([
-        { type: 'text', text: `一起參加卓育辰＆楊皖淩的婚禮吧！點連結登記出席：${joinUrl}` },
-      ])
+      if (liff.isApiAvailable('shareTargetPicker')) {
+        await liff.shareTargetPicker([{ type: 'text', text }])
+        return
+      }
     } catch {
-      // User cancelled the picker — non-fatal, the link and QR below still work.
+      // picker unavailable / cancelled → try the OS share sheet
     }
+    if (typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
+      try { await navigator.share({ text }) } catch { /* user cancelled — non-fatal */ }
+      return
+    }
+    copyLink()
   }
 
   return (
@@ -373,19 +403,17 @@ function ShareBlock({ joinUrl }: { joinUrl: string }) {
       <p className="text-ink/80">
         把這個連結傳給同行的人，他們加入就完成登記
       </p>
-      <p className="mt-3 break-all rounded-md bg-champagne/30 px-3 py-2 text-sm text-ink/70">
-        {joinUrl}
-      </p>
       <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:justify-center">
+        <button type="button" className="btn-primary" onClick={share}>
+          分享給同行的人
+        </button>
         <button type="button" className="btn-outline" onClick={copyLink}>
           {copied ? '已複製' : '複製連結'}
         </button>
-        {canShare && (
-          <button type="button" className="btn-primary" onClick={share}>
-            分享給同行的人
-          </button>
-        )}
       </div>
+      <p className="mt-3 break-all rounded-md bg-champagne/30 px-3 py-2 text-xs text-ink/60">
+        {joinUrl}
+      </p>
       {qrSvg && (
         <div
           className="mx-auto mt-6 h-40 w-40 [&>svg]:h-full [&>svg]:w-full"
@@ -396,10 +424,11 @@ function ShareBlock({ joinUrl }: { joinUrl: string }) {
   )
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
   return (
     <label className="block">
       <span className="field-label">{label}</span>
+      {hint && <span className="mt-1 mb-1 block text-xs leading-relaxed text-ink/50">{hint}</span>}
       {children}
     </label>
   )
