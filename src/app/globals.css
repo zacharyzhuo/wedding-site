@@ -103,7 +103,10 @@
   line-height: 1.2;
 }
 .raffle-name.reveal {
-  animation: raffle-pop 600ms cubic-bezier(0.2, 1.6, 0.4, 1);
+  /* forwards: hold the end state (opacity 1). Without it the default
+     fill-mode `none` reverts the element to opacity 0 after the pop, so the
+     winner name vanishes the moment the 600ms animation finishes. */
+  animation: raffle-pop 600ms cubic-bezier(0.2, 1.6, 0.4, 1) forwards;
 }
 @keyframes raffle-pop {
   from { transform: scale(0.4); opacity: 0; }
@@ -121,7 +124,7 @@
   box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
 }
 .raffle-avatar.roll   { width: 7rem; height: 7rem; }
-.raffle-avatar.reveal { width: 11rem; height: 11rem; animation: raffle-pop 600ms cubic-bezier(0.2, 1.6, 0.4, 1); }
+.raffle-avatar.reveal { width: 11rem; height: 11rem; animation: raffle-pop 600ms cubic-bezier(0.2, 1.6, 0.4, 1) forwards; }
 .raffle-avatar.fallback {
   display: flex;
   align-items: center;
@@ -198,6 +201,44 @@
 @keyframes confetti-fall {
   0%   { transform: translateY(-5vh) rotate(0deg); opacity: 1; }
   100% { transform: translateY(110vh) rotate(720deg); opacity: 0.7; }
+}
+
+/* ── Audio gate ──────────────────────────────────────────────────────────
+   Browsers block sound until a user gesture, so the screen opens on a
+   full-cover tap target that arms the raffle SFX. Sits above every raffle
+   overlay (z-30) and is clicked away once. */
+.audio-gate {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  cursor: pointer;
+  text-align: center;
+  background: rgba(31, 28, 26, 0.96);
+  color: #faf7f1;
+}
+.audio-gate .gate-title {
+  font-family: var(--font-serif, "Noto Serif TC"), serif;
+  font-size: 2.75rem;
+  letter-spacing: 0.18em;
+}
+.audio-gate .gate-sub {
+  font-size: 1.2rem;
+  letter-spacing: 0.1em;
+  color: rgba(250, 247, 241, 0.6);
+}
+.audio-gate .gate-pulse {
+  margin-top: 0.75rem;
+  font-size: 2rem;
+  animation: gate-pulse 1.6s ease-in-out infinite;
+}
+@keyframes gate-pulse {
+  0%, 100% { opacity: 0.35; transform: scale(1); }
+  50%      { opacity: 1;    transform: scale(1.08); }
 }
 
 /* ── Invitation page (landing) ──────────────────────────────────────────

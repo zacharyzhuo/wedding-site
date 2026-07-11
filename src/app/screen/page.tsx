@@ -11,6 +11,7 @@
 // Operate it: on the AV laptop, open the URL, F11 to fullscreen, leave it.
 
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { unlock, playTick, playReveal, playStandby } from '@/lib/raffle-sound'
 
 type DanmakuItem = {
   id: number
@@ -49,6 +50,11 @@ const REPLAY_CHECK_MS = 3000
 
 export default function ScreenPage() {
   const [ready, setReady] = useState(false)
+  // Browser autoplay policy blocks all SFX until a user gesture. The screen is
+  // operated by hand (open URL → F11 → leave it), so one tap to arm audio
+  // costs nothing. Until tapped, every sound call no-ops and the draw is silent
+  // but still correct.
+  const [audioReady, setAudioReady] = useState(false)
   const [token, setToken] = useState<string>('')
   const [photos, setPhotos] = useState<PhotoItem[]>([])
   const [currentPhoto, setCurrentPhoto] = useState<PhotoItem | null>(null)
@@ -111,6 +117,7 @@ export default function ScreenPage() {
     // holds for 10 s before the screen falls back to standby / carousel.
     let delay = 70
     const spin = () => {
+      playTick() // one slot tick per frame; roll decelerates so ticks do too
       setRolling(pool[Math.floor(Math.random() * pool.length)])
       delay *= 1.13
       if (delay < 420) {
@@ -118,6 +125,7 @@ export default function ScreenPage() {
       } else {
         raffleTimerRef.current = setTimeout(() => {
           setRaffleStage('reveal')
+          playReveal() // fanfare fires with the winner-avatar pop + confetti
           raffleTimerRef.current = setTimeout(() => setRaffleShow(null), 10000)
         }, delay)
       }
@@ -265,6 +273,9 @@ export default function ScreenPage() {
 
             const raffle = data.raffle ?? null
             if (raffle) {
+              // Chime once on the off→on edge (raffleModeRef still holds the
+              // last committed value here). No-ops until audio is unlocked.
+              if (raffle.mode === 'on' && raffleModeRef.current !== 'on') playStandby()
               setRaffleMode(raffle.mode)
               setRaffleStandby(raffle.standby)
               if (raffle.draw) {
@@ -476,6 +487,19 @@ export default function ScreenPage() {
       {!token && (
         <div className="absolute bottom-4 right-6 text-cream/40 text-sm">
           缺少 token 參數 — 請使用 /screen?token=…
+        </div>
+      )}
+
+      {/* One-time tap-to-start: arms the raffle SFX inside a user gesture,
+          then never returns unless the page reloads. */}
+      {!audioReady && (
+        <div
+          className="audio-gate"
+          onClick={() => { unlock(); setAudioReady(true) }}
+        >
+          <p className="gate-title">皖美育見你</p>
+          <p className="gate-sub">點一下畫面開始（啟用抽獎音效）</p>
+          <p className="gate-pulse">🔊</p>
         </div>
       )}
     </div>
