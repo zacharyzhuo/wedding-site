@@ -59,6 +59,7 @@ function isValid(b: Partial<RsvpBody>): b is RsvpBody {
   if (!b || typeof b !== 'object') return false
   if (b.source !== 'liff' && b.source !== 'fallback') return false
   if (!b.realName || typeof b.realName !== 'string') return false
+  if (!b.realName.trim()) return false
   if (!ALLOWED.has(String(b.side))) return false
   if (!ALLOWED.has(String(b.relationship))) return false
   if (!ALLOWED.has(String(b.attending))) return false
@@ -97,6 +98,17 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
     }
     if (!env.LINE_LIFF_ID_JOIN) return err(500, 'server not configured (LINE_LIFF_ID_JOIN)')
     lineUserId = user.userId
+
+    // Server-side guard for the leader-only invariant: a party MEMBER must
+    // never be promoted to leader by (re)submitting this form. The RSVP
+    // page's client already hides the leader form for members (dedup view),
+    // but that's UI-only — enforce it here too so a replayed/forged request
+    // can't mint a second party for someone who already joined one. Leaders
+    // re-submitting (existing?.role === 'leader') and solo/unidentified
+    // callers (existing is null) both fall through unchanged.
+    const existing = await getIdentity(env.DB, user.userId)
+    if (existing?.role === 'member') return err(409, 'already_member')
+
     leader = await upsertLeaderParty(env.DB, user, body, env.LINE_LIFF_ID_JOIN, env.RSVP_WEBHOOK_URL)
   }
 
@@ -158,7 +170,7 @@ async function upsertLeaderParty(
 
   const identityRow = {
     line_user_id: user.userId,
-    real_name: body.realName,
+    real_name: body.realName.trim(),
     diet: body.leaderDiet,
     party_id: code,
     role: 'leader' as const,

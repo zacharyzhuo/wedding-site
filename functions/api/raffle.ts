@@ -25,6 +25,18 @@ interface Body {
   diet?: string
 }
 
+// Mirrors src/lib/diet.ts's DIET_OPTIONS. functions/ doesn't cross-import
+// from src/ (same convention as rsvp.ts's ALLOWED_DIET) — keep in sync by
+// hand. Empty string is also accepted since diet is optional here.
+const ALLOWED_DIET = new Set([
+  '',
+  '無特殊需求',
+  '全素',
+  '蛋奶素',
+  '食物過敏（請於留言備註）',
+  '其他（請於留言備註）',
+])
+
 async function total(env: Env): Promise<number> {
   const row = await env.DB
     .prepare(`SELECT COUNT(*) AS n FROM raffle_entries`)
@@ -61,6 +73,7 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
     const body = await readJson<Body>(request)
     const realName = body?.realName?.trim()
     if (!realName) return err(400, 'name_required')
+    if (!ALLOWED_DIET.has(body?.diet ?? '')) return err(400, 'invalid diet')
 
     const now = Date.now()
     await upsertIdentity(env.DB, {

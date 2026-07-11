@@ -22,6 +22,18 @@ interface Body {
   diet?: string
 }
 
+// Mirrors src/lib/diet.ts's DIET_OPTIONS. functions/ doesn't cross-import
+// from src/ (same convention as rsvp.ts's ALLOWED_DIET) — keep in sync by
+// hand. Empty string is also accepted since diet is optional here.
+const ALLOWED_DIET = new Set([
+  '',
+  '無特殊需求',
+  '全素',
+  '蛋奶素',
+  '食物過敏（請於留言備註）',
+  '其他（請於留言備註）',
+])
+
 export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
   let user
   try {
@@ -36,6 +48,7 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
   const realName = body?.realName?.trim()
   if (!partyId) return err(400, 'missing partyId')
   if (!realName) return err(400, 'real name required')
+  if (!ALLOWED_DIET.has(body?.diet ?? '')) return err(400, 'invalid diet')
 
   const party = await getParty(env.DB, partyId)
   if (!party) return err(404, 'party not found')
@@ -66,6 +79,15 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
     updated_at: new Date(now).toISOString(),
   })
 
-  const leader = await getIdentity(env.DB, party.leader_user_id)
+  // mergeIdentity only fills a previously-null party_id — a caller who
+  // already belongs to a DIFFERENT party keeps that original party_id, so
+  // the party they actually ended up in can differ from the one they just
+  // tapped a link for. Re-read after the write and resolve the leader from
+  // whichever party_id the caller actually landed on, so leaderName never
+  // misreports which party they're really in.
+  const canonical = await getIdentity(env.DB, user.userId)
+  const resolvedPartyId = canonical?.party_id ?? partyId
+  const resolvedParty = resolvedPartyId === partyId ? party : await getParty(env.DB, resolvedPartyId)
+  const leader = resolvedParty ? await getIdentity(env.DB, resolvedParty.leader_user_id) : null
   return ok({ leaderName: leader?.real_name ?? null })
 }
