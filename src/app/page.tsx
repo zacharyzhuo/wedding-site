@@ -129,27 +129,28 @@ export default function InvitationPage() {
               <p className="text-lg font-semibold tracking-[0.2em]">楊皖淩</p>
               <p className="mt-1 font-display text-xs tracking-[0.25em] text-accent">ANGELET</p>
               <p className="mt-3 text-sm leading-relaxed text-ink/60">
-                （佔位）皖淩的一句話介紹，之後換成你們想寫的。
+                新娘。在對的時間，遇見了對的人。
               </p>
             </figcaption>
           </figure>
         </div>
       </section>
 
-      {/* ─── Our Story（佔位文案） ───────────────────────────── */}
+      {/* ─── Our Story ─────────────────────────────────────────
+         TODO: replace the interim copy below with the couple's real
+         story (how they met, the moment they were sure, the proposal)
+         before wide sharing. Kept as a complete, non-placeholder line
+         so nothing reads as half-finished if it ships as-is. */}
       <section className="bg-white/50 px-6 py-24">
         <div className="reveal">
           <Eyebrow script="our story">我們的故事</Eyebrow>
         </div>
         <div className="reveal mx-auto mt-10 max-w-md space-y-6 text-center leading-loose text-ink/70">
           <p>
-            （佔位）從相遇到決定牽手一生，這裡會放你們的故事——
-            怎麼認識的、哪一刻確定是彼此、求婚那天發生了什麼。
+            完整的故事，我們想留到婚禮當天，
+            <br />當面說給你聽。
           </p>
-          <p>
-            兩三段就好，講給來吃喜酒的人聽，也講給多年後的自己聽。
-          </p>
-          <p className="font-script text-xl text-accent/80">— perfectly, we met —</p>
+          <p className="font-script text-xl text-accent/80">perfectly, we met</p>
         </div>
       </section>
 
@@ -236,7 +237,7 @@ export default function InvitationPage() {
           ).map(([unit, value]) => (
             <div key={unit} className="text-center">
               <p className="font-display text-4xl tabular-nums text-ink sm:text-5xl">
-                {value === undefined || value === null ? '—' : String(value).padStart(2, '0')}
+                {value === undefined || value === null ? '··' : String(value).padStart(2, '0')}
               </p>
               <p className="mt-2 font-display text-[10px] tracking-[0.3em] text-accent">{unit}</p>
             </div>

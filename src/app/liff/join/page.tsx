@@ -11,8 +11,10 @@ import { useLiffProfile } from '@/lib/liff'
 import { getLiffIdToken } from '@/lib/liff-token'
 import { DIET_OPTIONS, buildDietValue, needsDietDetail } from '@/lib/diet'
 import { Field, SelectField, Spinner, StatusBanner } from '@/components/ui'
+import { mapApiError } from '@/lib/api-errors'
 
 const GENERIC_ERROR = '送出失敗，請稍後再試，或直接聯絡新人'
+const LINE_TIMEOUT_ERROR = 'LINE 連線逾時了，請關掉頁面、從官方帳號選單重新打開'
 const ADD_FRIEND_URL =
   process.env.NEXT_PUBLIC_LINE_OA_ADD_FRIEND_URL ?? 'https://line.me/R/ti/p/@160vcltf'
 const RSVP_LIFF_URL = `https://liff.line.me/${process.env.NEXT_PUBLIC_LIFF_ID_RSVP}`
@@ -72,7 +74,7 @@ export default function JoinLiffPage() {
         const res = await fetch(`/api/party/join?code=${encodeURIComponent(partyCode.code)}`)
         if (res.status === 404) { if (!cancelled) setCodeCheck({ status: 'invalid' }); return }
         const data = await res.json() as CodeCheckResponse
-        if (!res.ok || !data.ok) throw new Error(data.error ?? GENERIC_ERROR)
+        if (!res.ok || !data.ok) throw new Error(data.error ? mapApiError(data.error) : GENERIC_ERROR)
         if (!cancelled) setCodeCheck({ status: 'valid', leaderName: data.leaderName ?? null })
       } catch (e) {
         if (!cancelled) setCodeCheckError(e instanceof Error ? e.message : '載入失敗，請稍後再試')
@@ -93,7 +95,7 @@ export default function JoinLiffPage() {
     ;(async () => {
       try {
         const idToken = await getLiffIdToken()
-        if (!idToken) throw new Error('LINE 登入逾時，請重新進入。')
+        if (!idToken) throw new Error(LINE_TIMEOUT_ERROR)
         const res = await fetch('/api/identity/me', { headers: { 'x-line-id-token': idToken } })
         const data = await res.json() as MeResponse
         if (!res.ok || !data.ok) throw new Error(GENERIC_ERROR)
@@ -135,7 +137,7 @@ export default function JoinLiffPage() {
     setSubmitting(true)
     try {
       const idToken = await getLiffIdToken()
-      if (!idToken) throw new Error('LINE 登入逾時，請重新進入。')
+      if (!idToken) throw new Error(LINE_TIMEOUT_ERROR)
       const res = await fetch('/api/party/join', {
         method: 'POST',
         headers: { 'content-type': 'application/json', 'x-line-id-token': idToken },
@@ -147,7 +149,7 @@ export default function JoinLiffPage() {
       })
       if (res.status === 404) { setInvalidParty(true); return }
       const data = await res.json() as JoinResponse
-      if (!res.ok || !data.ok) throw new Error(data.error ?? GENERIC_ERROR)
+      if (!res.ok || !data.ok) throw new Error(data.error ? mapApiError(data.error) : GENERIC_ERROR)
       setJoinedLeaderName(data.leaderName ?? null)
       setJoinedMismatch(!!data.mismatch)
       setJoined(true)
@@ -190,8 +192,8 @@ export default function JoinLiffPage() {
     }
     return (
       <Centered>
-        <h1 className="text-3xl">加入{joinedLeaderName ?? '對方'}那一團完成 ❤</h1>
-        <p className="mt-4 text-ink/70">期待 2027/06/05 與您相見。</p>
+        <h1 className="text-3xl">加入{joinedLeaderName ?? '對方'}那一團完成</h1>
+        <p className="mt-4 text-ink/70">期待 2027/06/05 與你相見。</p>
         <UpdateLaterHint />
       </Centered>
     )
@@ -208,8 +210,8 @@ export default function JoinLiffPage() {
   if (meCheck.status === 'already') {
     return (
       <Centered>
-        <h1 className="text-3xl">你已加入{meCheck.leaderName ?? '對方'}那一團 ❤</h1>
-        <p className="mt-4 text-ink/70">期待 2027/06/05 與您相見。</p>
+        <h1 className="text-3xl">你已加入{meCheck.leaderName ?? '對方'}那一團</h1>
+        <p className="mt-4 text-ink/70">期待 2027/06/05 與你相見。</p>
         <UpdateLaterHint />
       </Centered>
     )
@@ -223,11 +225,11 @@ export default function JoinLiffPage() {
       <header className="text-center mb-8">
         <p className="text-xs uppercase tracking-[0.3em] text-accent">JOIN</p>
         <h1 className="mt-2 text-2xl">加入{leaderName ?? '對方'}那一團</h1>
-        <p className="mt-3 text-sm text-ink/60">您好，{profile.displayName}</p>
+        <p className="mt-3 text-sm text-ink/60">嗨，{profile.displayName}</p>
       </header>
 
       <form onSubmit={onSubmit} className="space-y-5" noValidate>
-        <Field label="你的真實姓名" error={nameError}>
+        <Field label="你的姓名（方便核對名單、安排座位）" error={nameError}>
           <input
             ref={realNameRef}
             type="text" name="realName" autoComplete="name" className="field-input"

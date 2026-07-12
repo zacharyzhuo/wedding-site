@@ -18,8 +18,11 @@
 import { useEffect, useRef, useState } from 'react'
 import { useLiffProfile } from '@/lib/liff'
 import { getLiffIdToken } from '@/lib/liff-token'
-import { DIET_OPTIONS } from '@/lib/diet'
+import { DIET_OPTIONS, needsDietDetail, buildDietValue } from '@/lib/diet'
+import { mapApiError } from '@/lib/api-errors'
 import { Spinner, StatusBanner } from '@/components/ui'
+
+const LINE_TIMEOUT_MSG = 'LINE 連線逾時了，請關掉頁面、從官方帳號選單重新打開'
 
 type MeResponse = { ok?: boolean; identified?: boolean }
 type RaffleResponse = {
@@ -29,8 +32,8 @@ type RaffleResponse = {
   mode?: 'on' | 'off'
   win?: { prizeName: string } | null
 }
-type FormState = { realName: string; diet: string }
-const initialForm: FormState = { realName: '', diet: DIET_OPTIONS[0] }
+type FormState = { realName: string; diet: string; dietDetail: string }
+const initialForm: FormState = { realName: '', diet: DIET_OPTIONS[0], dietDetail: '' }
 const POLL_MS = 5000
 
 export default function RaffleLiffPage() {
@@ -83,13 +86,13 @@ export default function RaffleLiffPage() {
     ;(async () => {
       try {
         const idToken = await getLiffIdToken()
-        if (!idToken) throw new Error('LINE 登入逾時，請重新進入。')
+        if (!idToken) throw new Error(LINE_TIMEOUT_MSG)
         const meRes = await fetch('/api/identity/me', { headers: { 'x-line-id-token': idToken } })
         const meData = await meRes.json() as MeResponse
-        if (!meRes.ok || !meData.ok) throw new Error(`HTTP ${meRes.status}`)
+        if (!meRes.ok || !meData.ok) throw new Error(mapApiError())
         setIdentified(!!meData.identified)
       } catch (e) {
-        setError(e instanceof Error ? e.message : '載入失敗，請稍後再試')
+        setError(e instanceof Error ? e.message : mapApiError())
       }
     })()
   }, [state.status])
@@ -100,13 +103,13 @@ export default function RaffleLiffPage() {
     setSubmitting(true)
     try {
       const idToken = await getLiffIdToken()
-      if (!idToken) throw new Error('LINE 登入逾時，請重新進入。')
+      if (!idToken) throw new Error(LINE_TIMEOUT_MSG)
       const res = await fetch('/api/raffle', {
         method: 'POST',
         headers: { 'content-type': 'application/json', 'x-line-id-token': idToken },
         body: identified
           ? undefined
-          : JSON.stringify({ realName: form.realName, diet: form.diet }),
+          : JSON.stringify({ realName: form.realName, diet: buildDietValue(form.diet, form.dietDetail) }),
       })
       const data = await res.json() as { ok?: boolean; total?: number; error?: string }
       if (!res.ok || !data.ok) {
@@ -117,12 +120,12 @@ export default function RaffleLiffPage() {
           setIdentified(false)
           throw new Error('請先填寫姓名')
         }
-        throw new Error(data.error ?? `HTTP ${res.status}`)
+        throw new Error(mapApiError(data.error))
       }
       setEntered(true)
       setTotalCount(data.total ?? null)
     } catch (e) {
-      setError(e instanceof Error ? e.message : '報名失敗，請稍後再試')
+      setError(e instanceof Error ? e.message : mapApiError())
     } finally {
       setSubmitting(false)
     }
@@ -175,11 +178,11 @@ export default function RaffleLiffPage() {
       ) : identified === false ? (
         <div>
           <p className="text-ink/70">
-            第一次來，先留下真實姓名讓我們對得上，
+            第一次來，先留下姓名讓我們對得上，
             <br />之後報名就不用再填囉。
           </p>
           <form onSubmit={enter} className="mt-8 space-y-5 text-left">
-            <Field label="你的真實姓名">
+            <Field label="你的姓名（幫我們核對名單）">
               <input
                 type="text" required className="field-input"
                 name="realName" autoComplete="name"
@@ -190,10 +193,20 @@ export default function RaffleLiffPage() {
             <Field label="你的飲食需求">
               <Select
                 value={form.diet}
-                onChange={v => setForm({ ...form, diet: v })}
+                onChange={v => setForm({ ...form, diet: v, dietDetail: needsDietDetail(v) ? form.dietDetail : '' })}
                 options={[...DIET_OPTIONS]}
               />
             </Field>
+            {needsDietDetail(form.diet) && (
+              <Field label="過敏原或其他說明（會轉達給餐廳）">
+                <input
+                  type="text" className="field-input"
+                  name="dietDetail"
+                  value={form.dietDetail}
+                  onChange={e => setForm({ ...form, dietDetail: e.target.value })}
+                />
+              </Field>
+            )}
             {error && <StatusBanner kind="error">{error}</StatusBanner>}
             <button
               type="submit"

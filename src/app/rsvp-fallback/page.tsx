@@ -8,6 +8,7 @@
 
 import { useRef, useState } from 'react'
 import { DIET_OPTIONS, buildDietValue, needsDietDetail } from '@/lib/diet'
+import { mapApiError } from '@/lib/api-errors'
 import { Field, SelectField, StatusBanner } from '@/components/ui'
 
 const GENERIC_ERROR = '送出失敗，請稍後再試，或直接聯絡新人'
@@ -35,7 +36,7 @@ export default function RsvpFallbackPage() {
   function validate(): boolean {
     const next: FieldErrors = {}
     if (!form.name.trim()) next.name = '請輸入姓名'
-    if (!form.side) next.side = '請選擇您是男方或女方的賓客'
+    if (!form.side) next.side = '請選擇你是男方或女方的賓客'
     if (!form.relationship) next.relationship = '請選擇與新人的關係'
     if (!form.attending) next.attending = '請選擇是否出席'
     setFieldErrors(next)
@@ -85,7 +86,7 @@ export default function RsvpFallbackPage() {
         let message = GENERIC_ERROR
         try {
           const data = await res.json() as { error?: string }
-          if (data?.error) message = data.error
+          if (data?.error) message = mapApiError(data.error)
         } catch {
           // non-JSON error body — keep the generic message
         }
@@ -100,8 +101,8 @@ export default function RsvpFallbackPage() {
   if (done) {
     return (
       <main className="mx-auto max-w-md px-6 py-20 text-center text-lg">
-        <h1 className="text-3xl">收到您的回覆 ❤</h1>
-        <p className="mt-4 text-ink/70">期待 2027/06/05 與您相見。</p>
+        <h1 className="text-3xl">收到你的回覆</h1>
+        <p className="mt-4 text-ink/70">期待 2027/06/05 與你相見。</p>
       </main>
     )
   }
@@ -115,14 +116,14 @@ export default function RsvpFallbackPage() {
       </header>
 
       <form onSubmit={onSubmit} className="space-y-5" noValidate>
-        <Field label="姓名" error={fieldErrors.name}>
+        <Field label="你的姓名（方便核對名單、安排座位）" error={fieldErrors.name}>
           <input
             ref={nameRef}
             type="text" name="name" autoComplete="name" className={BIG_INPUT}
             value={form.name} onChange={e => setForm({ ...form, name: e.target.value })}
           />
         </Field>
-        <Field label="您是男方還是女方的賓客？" error={fieldErrors.side}>
+        <Field label="你是男方還是女方的賓客？" error={fieldErrors.side}>
           <select
             ref={sideRef} name="side" autoComplete="off" className={BIG_INPUT}
             value={form.side} onChange={e => setForm({ ...form, side: e.target.value })}

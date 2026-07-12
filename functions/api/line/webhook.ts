@@ -44,7 +44,7 @@ const KEYWORDS_ADMIN = ['admin', '後台']
 
 // Shown when a guest asks for 悄悄話 before the couple opens it in the admin.
 const THANKYOU_CLOSED_MESSAGE =
-  '悄悄話還沒開放喔，婚禮當天再回來看看我們想對你說的話 ❤'
+  '悄悄話還沒開放喔，婚禮當天再回來看看我們想對你說的話'
 // 座位 lookup has no code yet — honest placeholder so the menu tile isn't dead.
 const SEAT_PLACEHOLDER_MESSAGE =
   '座位查詢會在婚禮當天開放，現場再麻煩你點開看看你的位子 🪑'
@@ -73,7 +73,7 @@ function flexCard(guestName: string | null, message: string) {
   const title = guestName ? `給 ${guestName}` : '謝謝你'
   return {
     type: 'flex',
-    altText: '悄悄話 ❤',
+    altText: '悄悄話',
     contents: {
       type: 'bubble',
       styles: {

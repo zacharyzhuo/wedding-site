@@ -162,7 +162,7 @@ export default function DanmakuLiffPage() {
   if (done) {
     return <Centered>
       <h1 className="text-3xl">
-        {done.pending ? '已送出，等待確認' : '已送上大螢幕'} ❤
+        {done.pending ? '已送出，等待確認' : '已送上大螢幕'}
       </h1>
       <p className="mt-4 text-ink/70">
         {done.hadPhoto
@@ -294,7 +294,7 @@ export default function DanmakuLiffPage() {
           <textarea
             rows={3}
             className="field-input"
-            placeholder="恭喜兩位 ❤"
+            placeholder="恭喜兩位"
             value={message}
             onChange={e => setMessage(e.target.value)}
             maxLength={MAX_LEN + 20}

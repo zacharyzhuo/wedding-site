@@ -6,8 +6,10 @@ import { getLiffIdToken } from '@/lib/liff-token'
 import { DIET_OPTIONS, buildDietValue, needsDietDetail, splitDietDetail } from '@/lib/diet'
 import { toSvgMarkup } from '@/lib/qr'
 import { Field, SelectField, Spinner, StatusBanner, Card } from '@/components/ui'
+import { mapApiError } from '@/lib/api-errors'
 
 const GENERIC_ERROR = '送出失敗，請稍後再試，或直接聯絡新人'
+const LINE_TIMEOUT_ERROR = 'LINE 連線逾時了，請關掉頁面、從官方帳號選單重新打開'
 
 // Field shape follows the party-identity field model (§4.5): the leader
 // submits party-level fields (side/relationship/attending/counts/notes) plus
@@ -101,10 +103,10 @@ export default function RsvpLiffPage() {
     ;(async () => {
       try {
         const idToken = await getLiffIdToken()
-        if (!idToken) throw new Error('LINE 登入逾時，請重新進入。')
+        if (!idToken) throw new Error(LINE_TIMEOUT_ERROR)
         const res = await fetch('/api/identity/me', { headers: { 'x-line-id-token': idToken } })
         const data = await res.json() as MeResponse
-        if (!res.ok || !data.ok) throw new Error(data.error ?? GENERIC_ERROR)
+        if (!res.ok || !data.ok) throw new Error(data.error ? mapApiError(data.error) : GENERIC_ERROR)
         if (cancelled) return
         if (data.role === 'member') {
           setMeCheck({
@@ -191,7 +193,7 @@ export default function RsvpLiffPage() {
   function validate(): boolean {
     const next: FieldErrors = {}
     if (!form.realName.trim()) next.realName = '請輸入姓名'
-    if (!form.side) next.side = '請選擇您是男方或女方的賓客'
+    if (!form.side) next.side = '請選擇你是男方或女方的賓客'
     if (!form.relationship) next.relationship = '請選擇與新人的關係'
     if (!form.attending) next.attending = '請選擇是否出席'
     setFieldErrors(next)
@@ -215,7 +217,7 @@ export default function RsvpLiffPage() {
     setSubmitting(true)
     try {
       const idToken = await getLiffIdToken()
-      if (!idToken) throw new Error('LINE 登入逾時，請重新進入。')
+      if (!idToken) throw new Error(LINE_TIMEOUT_ERROR)
       const res = await fetch('/api/rsvp', {
         method: 'POST',
         headers: { 'content-type': 'application/json', 'x-line-id-token': idToken },
@@ -229,7 +231,7 @@ export default function RsvpLiffPage() {
         }),
       })
       const data = await res.json() as { ok?: boolean; joinUrl?: string; error?: string }
-      if (!res.ok || !data.ok) throw new Error(data.error ?? GENERIC_ERROR)
+      if (!res.ok || !data.ok) throw new Error(data.error ? mapApiError(data.error) : GENERIC_ERROR)
       // Route straight to the leader "done" view (share link + live progress);
       // remember what was just submitted so a follow-up edit pre-fills.
       setLeaderPrefill(form)
@@ -248,12 +250,12 @@ export default function RsvpLiffPage() {
         <p className="text-xs uppercase tracking-[0.3em] text-accent">RSVP</p>
         <h1 className="mt-2 text-2xl">回覆出席</h1>
         <p className="mt-3 text-sm text-ink/60">
-          您好，{profile.displayName}
+          嗨，{profile.displayName}
         </p>
       </header>
 
       <form onSubmit={onSubmit} className="space-y-5" noValidate>
-        <Field label="你的真實姓名" error={fieldErrors.realName}>
+        <Field label="你的姓名（方便核對名單、安排座位）" error={fieldErrors.realName}>
           <input
             ref={realNameRef}
             type="text" name="realName" autoComplete="name" className="field-input"
@@ -262,7 +264,7 @@ export default function RsvpLiffPage() {
           />
         </Field>
 
-        <Field label="您是男方還是女方的賓客？" error={fieldErrors.side}>
+        <Field label="你是男方還是女方的賓客？" error={fieldErrors.side}>
           <select
             ref={sideRef} name="side" autoComplete="off" className="field-input"
             value={form.side}
@@ -421,15 +423,15 @@ function MemberDedupView({
     setSubmitting(true)
     try {
       const idToken = await getLiffIdToken()
-      if (!idToken) throw new Error('LINE 登入逾時，請重新進入。')
+      if (!idToken) throw new Error(LINE_TIMEOUT_ERROR)
       const res = await fetch('/api/party/member-diet', {
         method: 'POST',
         headers: { 'content-type': 'application/json', 'x-line-id-token': idToken },
         body: JSON.stringify({ diet: buildDietValue(diet, dietDetail), realName: trimmedName }),
       })
       const data = await res.json() as { ok?: boolean; diet?: string; error?: string }
-      if (!res.ok || !data.ok) throw new Error(data.error ?? GENERIC_ERROR)
-      setSavedMsg('已更新你的資料 ❤')
+      if (!res.ok || !data.ok) throw new Error(data.error ? mapApiError(data.error) : GENERIC_ERROR)
+      setSavedMsg('已幫你更新囉')
     } catch (e) {
       setError(e instanceof Error ? e.message : GENERIC_ERROR)
     } finally {
@@ -440,12 +442,12 @@ function MemberDedupView({
   return (
     <main className="mx-auto max-w-md px-6 py-16 text-center">
       <h1 className="text-2xl">
-        你是{leaderName ?? '對方'}那一團，團長已回覆出席 ❤
+        你是{leaderName ?? '對方'}那一團，團長已回覆出席
       </h1>
-      <p className="mt-4 text-ink/70">期待 2027/06/05 與您相見。</p>
+      <p className="mt-4 text-ink/70">期待 2027/06/05 與你相見。</p>
 
       <form onSubmit={onSubmit} className="mt-10 space-y-5 text-left" noValidate>
-        <Field label="真實姓名" error={nameError}>
+        <Field label="你的姓名（方便核對名單、安排座位）" error={nameError}>
           <input
             ref={realNameRef}
             type="text" name="realName" autoComplete="name" className="field-input"
