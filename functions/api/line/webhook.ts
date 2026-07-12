@@ -35,11 +35,12 @@ interface LineEvent {
 const KEYWORD_THANKYOU = '悄悄話'
 const KEYWORD_SEAT = '座位'
 // Admin console shortcut. Exact match only (a command, not conversation),
-// and ONLY answered for userIds on the ADMIN_LINE_USER_IDS allowlist —
-// guests typing it get silence, so the keyword's existence never leaks.
-// The link itself is not the secret: every /api/admin/* call re-verifies
-// idToken + allowlist server-side and fails closed for non-admins.
-const KEYWORD_ADMIN = '後台'
+// case-insensitive after NFKC, and ONLY answered for userIds on the
+// ADMIN_LINE_USER_IDS allowlist — guests typing it get silence, so the
+// keyword's existence never leaks. The link itself is not the secret:
+// every /api/admin/* call re-verifies idToken + allowlist server-side and
+// fails closed for non-admins.
+const KEYWORDS_ADMIN = ['admin', '後台']
 
 // Shown when a guest asks for 悄悄話 before the couple opens it in the admin.
 const THANKYOU_CLOSED_MESSAGE =
@@ -183,8 +184,8 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
     const text = (ev.message.text ?? '').normalize('NFKC').trim()
 
     let reply: object | null = null
-    if (text === KEYWORD_ADMIN) {
-      // Silence for non-admins is deliberate — see KEYWORD_ADMIN comment.
+    if (KEYWORDS_ADMIN.includes(text.toLowerCase())) {
+      // Silence for non-admins is deliberate — see KEYWORDS_ADMIN comment.
       if (isAdmin(ev.source?.userId, env) && env.NEXT_PUBLIC_LIFF_ID_ADMIN) {
         reply = adminConsoleFlex(env.NEXT_PUBLIC_LIFF_ID_ADMIN)
       }
