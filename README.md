@@ -44,6 +44,7 @@ src/lib/
   image-resize.ts           client-side canvas resize to ≤ 2048 px / 2 MB
                             (throws coded errors, e.g. DECODE_FAILED)
   upload-errors.ts          mapUploadError() — coded errors → zh-Hant copy
+  api-errors.ts             mapApiError() — API error codes → zh-Hant copy
   diet.ts                   diet options + allergy-detail merge (buildDietValue)
   qr.ts                     share-link QR renderer
   raffle-sound.ts           raffle reveal sound cues
@@ -64,9 +65,11 @@ functions/api/
   photos/presign.ts         POST — get presigned R2 PUT URL
   photos/index.ts           POST — commit metadata (+ caption-as-danmaku);
                             status via decideStatus, returned to the client
-  raffle.ts                 POST — enter; GET — {entered,total,mode,win}
+  raffle.ts                 POST — enter (open all event); GET — {entered,
+                            total,mode} once on load (no polling)
   screen/feed.ts            GET  — polled by /screen (visible-only photos)
-  line/webhook.ts           POST — 悄悄話 Messaging API webhook (Flex cards)
+  line/webhook.ts           POST — Messaging API webhook: 悄悄話 Flex cards
+                            + admin/後台 console-shortcut keyword
   admin/check.ts            GET  — gate check for /liff/admin first load
   admin/feed.ts             GET  — full feed for /liff/admin (all statuses)
   admin/danmaku/[id].ts     POST — { action: delete | approve } (approve also
@@ -77,7 +80,9 @@ functions/api/
                             INSERT — no oversell) / [id] redraw / index
   admin/thankyou/mode.ts    POST — 悄悄話 reply toggle
   admin/identity/*          GET list / POST set
-apps-script/rsvp-webhook.gs Sheet appender + email notifier
+  admin/test-tools.ts       POST — pre-event data wipes (danmaku+photos /
+                            raffle / own RSVP); gated by TEST_TOOLS env
+apps-script/rsvp-webhook.gs Sheet appender (sanitizes formula injection)
 migrations/0001-0006        D1: danmaku/photos/settings (key-value flags),
                             raffle entries+draws, prizes, thankyou_cards,
                             party + guest_identity, party message
@@ -216,7 +221,9 @@ In Pages → Settings → Environment variables (production):
 | `FORBIDDEN_WORDS` | comma-separated. Start with profanity + 前任名字 |
 | `R2_*` | from step 4 |
 | `RSVP_WEBHOOK_URL` | Apps Script /exec URL (existing) |
-| `LINE_CHANNEL_SECRET` / `_ACCESS_TOKEN` | blank for now |
+| `LINE_MESSAGING_CHANNEL_SECRET` | Messaging API channel secret (webhook signature — NOT the Login channel's) |
+| `LINE_CHANNEL_ACCESS_TOKEN` | Messaging API channel access token (webhook reply) |
+| `TEST_TOOLS` | `on` enables the admin 測試 tab + `/api/admin/test-tools`; flip **off** before the event |
 
 ### 8. Deploy
 

@@ -11,7 +11,8 @@ convert visitors into followers of the **皖美育見你** LINE Official Account
 (`src/app/page.tsx`) — RSVP (incl. party/group joins), the danmaku wall,
 photo upload, the lucky draw, and admin moderation live behind the OA as
 LIFF (LINE Front-end Framework) mini-apps; a Messaging API webhook answers
-the 悄悄話 keyword with personalised Flex cards. (Seating lookup is NOT
+OA-chat keywords (悄悄話 → personalised Flex cards; admin/後台 → an
+admin-console shortcut, allowlisted userIds only). (Seating lookup is NOT
 implemented yet — its marketing copy was removed from the landing page
 2026-07-12; a rich-menu slot is still reserved for it.) Dynamic logic runs
 in Cloudflare Pages Functions; live event data lives in D1; photo binaries
@@ -64,20 +65,24 @@ that validates the link before showing the form);
 type/targets, deliberately append-only). Shared UI primitives (Eyebrow,
 Field, SelectField, Spinner, ConfirmButton, StatusBanner, Card) live in
 `src/components/ui.tsx` — use them instead of re-rolling per-page form
-chrome; user-facing upload errors go through `src/lib/upload-errors.ts`
-(zh-Hant copy only, never raw HTTP codes).
+chrome; user-facing errors go through `src/lib/upload-errors.ts` (upload
+failures) and `src/lib/api-errors.ts` (`mapApiError` for API error codes) —
+always zh-Hant copy, never raw HTTP codes or English error strings.
 
 `functions/api/*` are Cloudflare Pages Functions (Workers runtime): `rsvp.ts`
 forwards to Apps Script; `party/join.ts` (POST join + GET preflight) and
 `party/member-diet.ts` (member self-service: diet + own name) back the party
 flow; `danmaku.ts` inserts a text row into D1; `photos/presign.ts` +
 `photos/index.ts` do R2 presign then commit metadata; `raffle.ts` is entry
-(POST) + status (GET: `{entered,total,mode,win}` — polled by the raffle LIFF
-for the win banner); `screen/feed.ts` is polled by `/screen`;
-`line/webhook.ts` is the 悄悄話 Messaging API webhook; `admin/*` covers
-check / feed / approve-delete-restore / hide-unhide-approve / mode toggles /
-raffle ops (draw is a single conditional INSERT...SELECT so concurrent taps
-can't oversell a prize) / identity management.
+(POST, open the whole event — no mode gate) + status (GET: `{entered,total,
+mode}`, fetched once on load, no polling — winners are announced on `/screen`,
+not on the LIFF page); `screen/feed.ts` is polled by `/screen`;
+`line/webhook.ts` is the Messaging API webhook (悄悄話 cards + the admin/後台
+console-shortcut keyword); `admin/*` covers check / feed /
+approve-delete-restore / hide-unhide-approve / mode toggles / raffle ops
+(draw & redraw require `raffle_mode` on; draw is a single conditional
+INSERT...SELECT so concurrent taps can't oversell a prize) / identity
+management / `test-tools` (pre-event data wipes, gated by `TEST_TOOLS`).
 
 Shared helpers in `functions/_lib/`: `liff-verify.ts` re-verifies every
 request's LIFF idToken against LINE's `/oauth2/v2.1/verify` endpoint each
@@ -98,7 +103,10 @@ D1 schema (`migrations/0001`–`0006`): `danmaku` + `photos` + `settings`
 audit, prize-name snapshot) + `raffle_prizes`, `thankyou_cards`, `party` +
 `guest_identity`, party message. `apps-script/rsvp-webhook.gs` lives inside
 the couple's Google Sheet (Extensions → Apps Script), deployed separately —
-not part of this repo's build.
+not part of this repo's build. It sanitizes every guest free-text field
+against spreadsheet formula injection (leading `= + - @` get quoted); the
+repo copy is the source, but the **live copy must be re-pasted + redeployed
+in the Sheet** for any change to take effect.
 
 ## Conventions & gotchas
 
@@ -109,9 +117,10 @@ not part of this repo's build.
   from filling up.
 - Env vars split `NEXT_PUBLIC_*` (client-visible: LIFF IDs, OA add-friend URL)
   from server-only secrets (`RSVP_WEBHOOK_URL`, `LINE_LOGIN_CHANNEL_ID`,
-  `ADMIN_LINE_USER_IDS`, `SCREEN_TOKEN`, `FORBIDDEN_WORDS`, `R2_*`); server
-  secrets go in the Cloudflare Pages dashboard only, Pages Functions don't
-  read `.env.local` (see `.env.example`).
+  `LINE_MESSAGING_CHANNEL_SECRET`, `LINE_CHANNEL_ACCESS_TOKEN`,
+  `ADMIN_LINE_USER_IDS`, `SCREEN_TOKEN`, `FORBIDDEN_WORDS`, `TEST_TOOLS`,
+  `R2_*`); server secrets go in the Cloudflare Pages dashboard only, Pages
+  Functions don't read `.env.local` (see `.env.example`).
 - `/screen?token=<SCREEN_TOKEN>` gates the big-screen view; the token does
   not rotate (see README).
 - `functions/` is its own TypeScript project (`functions/tsconfig.json`
@@ -135,6 +144,13 @@ not part of this repo's build.
 - No rate limiting on danmaku/photo submission — flip `moderation_mode` to
   `manual` if abused (since 2026-07-12 that gates photos as well as text).
 - `/rsvp-fallback` has no identity/edit path by design; resubmits append new
-  Sheet rows (the form warns the guest).
-- Seating lookup (我的座位) has no code yet; rich menu still on the old
-  layout. Test prizes (護手霜 ×2) must be replaced before the event.
+  Sheet rows (the form warns the guest). It also needs no LINE login (elderly
+  path), so it's the one anonymous write endpoint — a Turnstile gate is
+  planned but not yet built.
+- Cloudflare account is on the **free Workers tier** (only R2 is paid), so a
+  request flood fails closed (429, no bill), not a runaway charge. A DoS is an
+  availability risk for the event night, not a billing one.
+- Before the event: flip `TEST_TOOLS` **off** in the Pages dashboard (hides
+  the admin 測試 tab + disables `/api/admin/test-tools`); replace test prizes
+  (護手霜 ×2); seating lookup (我的座位) still has no code; rich menu still on
+  the old layout.
