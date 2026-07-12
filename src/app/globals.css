@@ -2,12 +2,24 @@
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  --color-ink: #1f1c1a;
+  --color-cream: #faf7f1;
+  --color-champagne: #e8dccb;
+  --color-accent: #a08254;
+}
+
 @layer base {
   html { color-scheme: light; }
   body {
     @apply bg-cream text-ink font-sans antialiased;
   }
   h1, h2, h3 { @apply font-serif tracking-wide; }
+
+  /* Bigger effective tap targets, no 300ms ghost-click delay on mobile. */
+  button, a, input, select, textarea, [role="button"] {
+    touch-action: manipulation;
+  }
 }
 
 /* Danmaku — single right→left flight, 14 s. Each row sets --row-y inline.
@@ -248,7 +260,7 @@
    background-image after the 2026-09 shoot with zero layout change. */
 .arch {
   border-radius: 999px 999px 18px 18px;
-  box-shadow: 14px 14px 0 #e8dccb;
+  box-shadow: 14px 14px 0 var(--color-champagne);
 }
 .arch-hero {
   width: min(72vw, 300px);
@@ -259,7 +271,7 @@
 .arch-portrait {
   width: 100%;
   aspect-ratio: 3 / 4;
-  box-shadow: 10px 10px 0 #e8dccb;
+  box-shadow: 10px 10px 0 var(--color-champagne);
 }
 
 /* Hero load-in: staggered fade-up via per-element animation-delay. */
@@ -295,7 +307,7 @@
   top: 50%;
   width: 7px;
   height: 7px;
-  background: #a08254;
+  background: var(--color-accent);
   transform: translate(-50%, -50%) rotate(45deg);
 }
 
@@ -312,7 +324,7 @@
   width: 9px;
   height: 9px;
   border-radius: 9999px;
-  background: #a08254;
+  background: var(--color-accent);
 }
 .timeline-line {
   position: absolute;
@@ -320,7 +332,7 @@
   top: calc(0.45em + 12px);
   bottom: 2px;
   width: 1px;
-  background: #e8dccb;
+  background: var(--color-champagne);
 }
 
 /* Gallery placeholder marquee — content duplicated once in JSX, slide by
@@ -362,7 +374,56 @@
   .field-label { @apply block text-sm text-ink/70 mb-1; }
   .field-input {
     @apply w-full rounded-md border border-champagne bg-white
-           px-4 py-3 text-base focus:outline-none focus:ring-2
-           focus:ring-accent/40 focus:border-accent;
+           px-4 py-3 text-base focus-visible:outline-none focus-visible:ring-2
+           focus-visible:ring-accent/40 focus-visible:border-accent;
+  }
+}
+
+/* Inline spinner — used by ui.tsx's <Spinner>. */
+.spinner {
+  display: inline-block;
+  width: 1rem;
+  height: 1rem;
+  border: 2px solid var(--color-champagne);
+  border-top-color: var(--color-accent);
+  border-radius: 9999px;
+  animation: spinner-spin 700ms linear infinite;
+}
+@keyframes spinner-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ── Reduced motion ──────────────────────────────────────────────────────
+   carousel-fade is left untouched: it's the essential state change for the
+   photo carousel, not decorative motion, and is already slow (800ms). */
+@keyframes danmaku-fade {
+  0%, 100% { opacity: 0; }
+  15%, 85% { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .hero-item {
+    animation: none;
+    opacity: 1;
+    transform: none;
+  }
+  .reveal {
+    transition: none;
+  }
+  .invite-marquee {
+    animation-play-state: paused;
+  }
+  .danmaku-item {
+    animation: danmaku-fade 4s ease-in-out forwards;
+  }
+  .raffle-confetti span {
+    animation: none;
+    opacity: 0;
+  }
+  .audio-gate .gate-pulse {
+    animation: none;
+  }
+  .raffle-name.reveal,
+  .raffle-avatar.reveal {
+    animation: none;
   }
 }

@@ -14,6 +14,7 @@
 // non-LINE guests.
 
 import { useEffect, useState } from 'react'
+import { Eyebrow } from '@/components/ui'
 
 const ADD_FRIEND_URL =
   process.env.NEXT_PUBLIC_LINE_OA_ADD_FRIEND_URL ?? 'https://line.me/R/ti/p/@160vcltf'
@@ -67,16 +68,6 @@ function useCountdown() {
   return left
 }
 
-function Eyebrow({ script, title }: { script: string; title: string }) {
-  return (
-    <div className="text-center">
-      <p className="font-script text-2xl text-accent/90">{script}</p>
-      <h2 className="mt-3 text-2xl tracking-[0.25em] text-ink">{title}</h2>
-      <div className="ornament mx-auto mt-5" aria-hidden />
-    </div>
-  )
-}
-
 export default function InvitationPage() {
   useReveal()
   const left = useCountdown()
@@ -103,7 +94,11 @@ export default function InvitationPage() {
           We&rsquo;re getting married
         </p>
 
-        <p className="hero-item mt-12 animate-bounce text-ink/30" style={{ animationDelay: '600ms' }} aria-hidden>
+        <p
+          className="hero-item mt-12 animate-bounce motion-reduce:animate-none text-ink/30"
+          style={{ animationDelay: '600ms' }}
+          aria-hidden
+        >
           ↓
         </p>
       </section>
@@ -111,7 +106,7 @@ export default function InvitationPage() {
       {/* ─── 新郎新娘 ─────────────────────────────────────────── */}
       <section className="px-6 py-24">
         <div className="reveal">
-          <Eyebrow script="the groom &amp; the bride" title="新 郎 新 娘" />
+          <Eyebrow script="the groom &amp; the bride">新郎新娘</Eyebrow>
         </div>
         <div className="mx-auto mt-14 grid max-w-lg grid-cols-2 gap-x-6 gap-y-10 sm:gap-x-10">
           <figure className="reveal text-center">
@@ -144,7 +139,7 @@ export default function InvitationPage() {
       {/* ─── Our Story（佔位文案） ───────────────────────────── */}
       <section className="bg-white/50 px-6 py-24">
         <div className="reveal">
-          <Eyebrow script="our story" title="我 們 的 故 事" />
+          <Eyebrow script="our story">我們的故事</Eyebrow>
         </div>
         <div className="reveal mx-auto mt-10 max-w-md space-y-6 text-center leading-loose text-ink/70">
           <p>
@@ -161,7 +156,7 @@ export default function InvitationPage() {
       {/* ─── 婚禮資訊 ─────────────────────────────────────────── */}
       <section className="px-6 py-24">
         <div className="reveal">
-          <Eyebrow script="wedding day" title="婚 禮 資 訊" />
+          <Eyebrow script="wedding day">婚禮資訊</Eyebrow>
         </div>
 
         <div className="reveal mx-auto mt-12 max-w-md rounded-2xl border border-champagne bg-white/70 p-8 text-center shadow-[10px_10px_0_#e8dccb]">
@@ -196,7 +191,7 @@ export default function InvitationPage() {
       {/* ─── 相簿（佔位跑馬燈） ──────────────────────────────── */}
       <section className="py-24">
         <div className="reveal px-6">
-          <Eyebrow script="gallery" title="相 簿" />
+          <Eyebrow script="gallery">相簿</Eyebrow>
           <p className="mt-4 text-center text-sm text-ink/50">
             婚紗照拍攝於 2026 年秋天，屆時在這裡與大家見面。
           </p>
@@ -228,7 +223,7 @@ export default function InvitationPage() {
       {/* ─── 倒數 ─────────────────────────────────────────────── */}
       <section className="bg-white/50 px-6 py-24 text-center">
         <div className="reveal">
-          <Eyebrow script="counting down" title="倒 數 計 時" />
+          <Eyebrow script="counting down">倒數計時</Eyebrow>
         </div>
         <div className="reveal mx-auto mt-12 flex max-w-md items-start justify-center gap-6 sm:gap-10">
           {(
@@ -240,7 +235,7 @@ export default function InvitationPage() {
             ] as const
           ).map(([unit, value]) => (
             <div key={unit} className="text-center">
-              <p className="font-display text-4xl text-ink sm:text-5xl">
+              <p className="font-display text-4xl tabular-nums text-ink sm:text-5xl">
                 {value === undefined || value === null ? '—' : String(value).padStart(2, '0')}
               </p>
               <p className="mt-2 font-display text-[10px] tracking-[0.3em] text-accent">{unit}</p>
@@ -252,10 +247,10 @@ export default function InvitationPage() {
       {/* ─── RSVP / 加入官方帳號 ─────────────────────────────── */}
       <section className="bg-ink px-6 py-28 text-center text-cream">
         <p className="reveal font-script text-2xl text-champagne/90">save your seat</p>
-        <h2 className="reveal mt-4 text-2xl tracking-[0.25em]">敬 邀 出 席</h2>
+        <h2 className="reveal mt-4 text-2xl tracking-[0.25em]">敬邀出席</h2>
         <p className="reveal mx-auto mt-8 max-w-md leading-relaxed text-cream/70">
           加入我們的官方帳號「皖美育見你」，線上回覆出席、
-          查看座位、上傳照片、參加抽獎——婚禮的一切都在裡面。
+          上傳照片、參加抽獎，婚禮的一切都在裡面。
         </p>
         <p className="reveal mx-auto mt-4 max-w-md text-xs leading-relaxed text-cream/40">
           『皖美育見你』取自皖淩的「皖」與育辰的「育」，諧音「完美遇見你」。

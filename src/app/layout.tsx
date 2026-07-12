@@ -1,4 +1,4 @@
-import type { Metadata } from 'next'
+import type { Metadata, Viewport } from 'next'
 import { Aboreto, Petit_Formal_Script, Noto_Serif_TC } from 'next/font/google'
 import './globals.css'
 
@@ -13,7 +13,11 @@ const serifTC = Noto_Serif_TC({ weight: ['400', '600', '900'], preload: false, v
 export const metadata: Metadata = {
   title: '皖美育見你 · 卓育辰 ＆ 楊皖淩 婚禮',
   description:
-    '2027 年 6 月 5 日｜CHALET V 台北。加入官方帳號，回覆出席、查看座位、參加抽獎。',
+    '2027 年 6 月 5 日｜CHALET V 台北。加入官方帳號，回覆出席、參加抽獎。',
+}
+
+export const viewport: Viewport = {
+  themeColor: '#faf7f1',
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
