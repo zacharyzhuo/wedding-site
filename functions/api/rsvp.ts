@@ -44,6 +44,10 @@ interface RsvpBody {
 
 const ALLOWED = new Set(['男方', '女方', '家長', '親戚', '朋友', '出席', '不克出席'])
 
+// Same magnitude as danmaku's MAX_LEN / photos' MAX_CAPTION — a generous cap
+// for a person's name, just enough to reject abuse/mistakes.
+const MAX_NAME_LEN = 40
+
 // Diet is a fixed dropdown on the form. Empty string is also accepted so
 // fallback/older submissions don't 400. Anything outside this set is rejected.
 const ALLOWED_DIET = new Set([
@@ -55,11 +59,22 @@ const ALLOWED_DIET = new Set([
   '其他（請於留言備註）',
 ])
 
+// Detail-merged forms produced by buildDietValue (src/lib/diet.ts): base diet
+// + free-text detail, e.g. 食物過敏（花生）. functions/ doesn't cross-import
+// from src/ (see ALLOWED_DIET comment above), so mirror the shape check
+// instead of the exact placeholder strings.
+const DIET_DETAIL_PATTERN = /^(?:食物過敏|其他)（[^（）]{1,60}）$/
+
+function isAllowedDiet(diet: string): boolean {
+  return ALLOWED_DIET.has(diet) || DIET_DETAIL_PATTERN.test(diet)
+}
+
 function isValid(b: Partial<RsvpBody>): b is RsvpBody {
   if (!b || typeof b !== 'object') return false
   if (b.source !== 'liff' && b.source !== 'fallback') return false
   if (!b.realName || typeof b.realName !== 'string') return false
   if (!b.realName.trim()) return false
+  if (b.realName.trim().length > MAX_NAME_LEN) return false
   if (!ALLOWED.has(String(b.side))) return false
   if (!ALLOWED.has(String(b.relationship))) return false
   if (!ALLOWED.has(String(b.attending))) return false
@@ -67,10 +82,10 @@ function isValid(b: Partial<RsvpBody>): b is RsvpBody {
   if (typeof b.childCount !== 'number' || b.childCount < 0 || b.childCount > 50) return false
   if (typeof b.childSeatCount !== 'number' || b.childSeatCount < 0 || b.childSeatCount > b.childCount) return false
   // Unconditional (unlike the other free-text fields below): leaderDiet has a
-  // fixed dropdown on every client, so anything outside ALLOWED_DIET —
+  // fixed dropdown on every client, so anything outside the allowed set —
   // including "missing entirely" — is rejected rather than silently passed
   // through, same treatment as side/relationship/attending.
-  if (!ALLOWED_DIET.has(String(b.leaderDiet ?? ''))) return false
+  if (!isAllowedDiet(String(b.leaderDiet ?? ''))) return false
   if (b.notes !== undefined && typeof b.notes !== 'string') return false
   if (b.message !== undefined && typeof b.message !== 'string') return false
   return true

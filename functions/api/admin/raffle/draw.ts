@@ -6,6 +6,13 @@
 // holding an ACTIVE win — at most one prize per person, but a forfeited
 // (absent) winner stays eligible for later draws. The inserted row is the
 // audit record; the screen picks it up on its next feed poll.
+//
+// Stock check + insert are collapsed into one conditional INSERT ... SELECT
+// so two concurrent draws for the same prize (couple + MC both tapping
+// "開抽" on separate phones) can't both pass a stock check performed as a
+// separate SELECT and jointly oversell the prize. If the prize itself
+// vanished between page load and tap (deleted elsewhere), the upfront
+// existence check below returns a distinct message before we even try.
 
 import { err, ok, readJson } from '../../../_lib/http'
 import { LiffAuthError } from '../../../_lib/liff-verify'
@@ -32,16 +39,10 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
   if (!Number.isInteger(prizeId) || prizeId <= 0) return err(400, 'prizeId required')
 
   const prize = await env.DB
-    .prepare(
-      `SELECT p.id, p.name, p.quantity,
-              (SELECT COUNT(*) FROM raffle_draws d
-                WHERE d.prize_id = p.id AND d.status = 'active') AS won
-       FROM raffle_prizes p WHERE p.id = ?`
-    )
+    .prepare(`SELECT id, name, quantity FROM raffle_prizes WHERE id = ?`)
     .bind(prizeId)
-    .first<{ id: number; name: string; quantity: number; won: number }>()
-  if (!prize) return err(404, 'prize not found')
-  if (prize.won >= prize.quantity) return err(400, `「${prize.name}」已抽完`)
+    .first<{ id: number; name: string; quantity: number }>()
+  if (!prize) return err(404, '獎品已不存在')
 
   const eligibleRes = await env.DB
     .prepare(
@@ -63,10 +64,12 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
   const res = await env.DB
     .prepare(
       `INSERT INTO raffle_draws (prize, prize_id, winner_id, winner_name, status, drawn_at)
-       VALUES (?, ?, ?, ?, 'active', ?)`
+       SELECT ?3, ?1, ?4, ?5, 'active', ?6
+       WHERE (SELECT COUNT(*) FROM raffle_draws WHERE prize_id = ?1 AND status = 'active') < ?2`
     )
-    .bind(prize.name, prize.id, winner.line_user_id, winner.display_name, now)
+    .bind(prize.id, prize.quantity, prize.name, winner.line_user_id, winner.display_name, now)
     .run()
+  if ((res.meta.changes ?? 0) === 0) return err(409, '獎品已抽完或不存在')
 
   return ok({
     draw: {

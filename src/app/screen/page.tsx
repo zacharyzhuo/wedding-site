@@ -11,7 +11,17 @@
 // Operate it: on the AV laptop, open the URL, F11 to fullscreen, leave it.
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { unlock, playTick, playReveal, playStandby } from '@/lib/raffle-sound'
+import { unlock, isUnlocked, playTick, playReveal, playStandby } from '@/lib/raffle-sound'
+
+// Confetti tints — derived ONLY from the four palette tokens (champagne /
+// accent / cream, plus a lightened tint of accent) so the reveal never
+// drifts from the invite's palette even against the dark carousel backdrop.
+const CONFETTI_COLORS = ['#e8dccb', '#a08254', '#faf7f1', '#bda887']
+
+// Remembers that this browser tab already granted an audio-unlock gesture
+// this session, so an operator's accidental page reload mid-event doesn't
+// re-block the whole display behind the tap gate.
+const AUDIO_UNLOCK_KEY = 'wedding-screen-audio-unlocked'
 
 type DanmakuItem = {
   id: number
@@ -55,6 +65,10 @@ export default function ScreenPage() {
   // costs nothing. Until tapped, every sound call no-ops and the draw is silent
   // but still correct.
   const [audioReady, setAudioReady] = useState(false)
+  // null = not yet checked sessionStorage; true = show the full-cover gate;
+  // false = a prior unlock this session was found, try to resume silently.
+  const [showFullGate, setShowFullGate] = useState<boolean | null>(null)
+  const [showMiniUnlock, setShowMiniUnlock] = useState(false)
   const [token, setToken] = useState<string>('')
   const [photos, setPhotos] = useState<PhotoItem[]>([])
   const [currentPhoto, setCurrentPhoto] = useState<PhotoItem | null>(null)
@@ -140,6 +154,35 @@ export default function ScreenPage() {
     const t = new URL(window.location.href).searchParams.get('token') ?? ''
     setToken(t)
     setReady(true)
+  }, [])
+
+  // Audio-unlock persistence: an operator's reload mid-event must not drop
+  // the room back behind the full tap gate. If this tab already unlocked
+  // audio earlier this session, skip the gate and try to resume the audio
+  // context directly; only fall back to a small non-blocking button if that
+  // silent resume attempt is actually blocked (e.g. a fresh browser policy).
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const wasUnlocked = sessionStorage.getItem(AUDIO_UNLOCK_KEY) === '1'
+    if (!wasUnlocked) {
+      setShowFullGate(true)
+      return
+    }
+    setShowFullGate(false)
+    unlock()
+    const t = setTimeout(() => {
+      if (isUnlocked()) setAudioReady(true)
+      else setShowMiniUnlock(true)
+    }, 300)
+    return () => clearTimeout(t)
+  }, [])
+
+  const armAudio = useCallback(() => {
+    unlock()
+    setAudioReady(true)
+    setShowFullGate(false)
+    setShowMiniUnlock(false)
+    if (typeof window !== 'undefined') sessionStorage.setItem(AUDIO_UNLOCK_KEY, '1')
   }, [])
 
   // Put one message on screen. No dedupe here — replays go through this
@@ -379,7 +422,7 @@ export default function ScreenPage() {
                   style={{ backgroundImage: `url(${previousPhoto.url})` }}
                 />
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img className="carousel-photo" src={previousPhoto.url} alt="" />
+                <img className="carousel-photo" src={previousPhoto.url} alt="" width={1600} height={1200} />
               </div>
             )}
             <div key={currentPhoto.id} className="carousel-slide active">
@@ -388,7 +431,18 @@ export default function ScreenPage() {
                 style={{ backgroundImage: `url(${currentPhoto.url})` }}
               />
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img className="carousel-photo" src={currentPhoto.url} alt="" />
+              <img className="carousel-photo" src={currentPhoto.url} alt="" width={1600} height={1200} />
+              {(currentPhoto.caption || currentPhoto.uploaderName) && (
+                <div className="absolute bottom-8 left-1/2 z-10 max-w-[80%] -translate-x-1/2 rounded-full bg-cream/90 px-5 py-2 text-center text-lg text-ink shadow-lg">
+                  {currentPhoto.caption && <span>{currentPhoto.caption}</span>}
+                  {currentPhoto.caption && currentPhoto.uploaderName && (
+                    <span className="mx-2 text-ink/40">·</span>
+                  )}
+                  {currentPhoto.uploaderName && (
+                    <span className="text-ink/60">{currentPhoto.uploaderName}</span>
+                  )}
+                </div>
+              )}
             </div>
           </>
         )}
@@ -406,7 +460,7 @@ export default function ScreenPage() {
             }}
           >
             <span>{d.message}</span>
-            <span className="name">— {d.displayName}</span>
+            <span className="name">· {d.displayName}</span>
           </div>
         ))}
       </div>
@@ -431,7 +485,7 @@ export default function ScreenPage() {
                         <span key={i} className="winner-chip">
                           {w.avatar ? (
                             // eslint-disable-next-line @next/next/no-img-element
-                            <img src={w.avatar} alt="" />
+                            <img src={w.avatar} alt="" width={36} height={36} />
                           ) : (
                             <span className="winner-fallback">{w.name.slice(0, 1)}</span>
                           )}
@@ -473,7 +527,7 @@ export default function ScreenPage() {
                     style={{
                       left: `${(i * 137) % 100}%`,
                       animationDelay: `${(i % 12) * 0.25}s`,
-                      background: ['#e8b4b8', '#f5e6c8', '#b8c8e8', '#d8e8c8'][i % 4],
+                      background: CONFETTI_COLORS[i % CONFETTI_COLORS.length],
                     }}
                   />
                 ))}
@@ -490,17 +544,30 @@ export default function ScreenPage() {
         </div>
       )}
 
-      {/* One-time tap-to-start: arms the raffle SFX inside a user gesture,
-          then never returns unless the page reloads. */}
-      {!audioReady && (
-        <div
-          className="audio-gate"
-          onClick={() => { unlock(); setAudioReady(true) }}
-        >
+      {/* Tap-to-start gate: arms the raffle SFX inside a real user gesture.
+          A real <button> (not a div/onClick) so it's keyboard-reachable and
+          announced correctly. Shown only when no unlock from earlier this
+          session was found (see the sessionStorage effect above). */}
+      {showFullGate && (
+        <button type="button" className="audio-gate border-0 bg-transparent p-0" onClick={armAudio}>
           <p className="gate-title">皖美育見你</p>
           <p className="gate-sub">點一下畫面開始（啟用抽獎音效）</p>
           <p className="gate-pulse">🔊</p>
-        </div>
+        </button>
+      )}
+
+      {/* Small non-blocking fallback: shown only when a reload found a prior
+          unlock this session but the silent auto-resume attempt was still
+          blocked (e.g. a stricter browser policy) — the display itself must
+          never re-block on a reload, so this never covers the screen. */}
+      {showMiniUnlock && !audioReady && (
+        <button
+          type="button"
+          onClick={armAudio}
+          className="absolute bottom-4 left-4 z-40 rounded-full border-0 bg-cream/90 px-3 py-1.5 text-xs text-ink shadow-lg"
+        >
+          🔊 恢復音效
+        </button>
       )}
     </div>
   )
@@ -508,9 +575,10 @@ export default function ScreenPage() {
 
 // LINE avatars are optional (users can hide them) — fall back to an initial.
 function RaffleAvatar({ name, avatar, size }: { name: string; avatar: string | null; size: 'roll' | 'reveal' }) {
+  const px = size === 'reveal' ? 176 : 112 // matches .raffle-avatar.roll/.reveal in globals.css
   if (avatar) {
     // eslint-disable-next-line @next/next/no-img-element
-    return <img className={`raffle-avatar ${size}`} src={avatar} alt="" />
+    return <img className={`raffle-avatar ${size}`} src={avatar} alt="" width={px} height={px} />
   }
   return <span className={`raffle-avatar fallback ${size}`}>{name.slice(0, 1)}</span>
 }

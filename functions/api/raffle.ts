@@ -52,11 +52,36 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
     if (e instanceof LiffAuthError) return err(e.status, e.message)
     throw e
   }
-  const entered = await env.DB
-    .prepare(`SELECT 1 AS x FROM raffle_entries WHERE line_user_id = ?`)
-    .bind(user.userId)
-    .first()
-  return ok({ entered: entered !== null, total: await total(env) })
+  // Four independent reads batched in parallel — same rationale as
+  // screen/feed.ts: every D1 query is a network round-trip, and this
+  // endpoint gets polled every 5s from the raffle LIFF page.
+  const [entered, totalN, modeRow, winRow] = await Promise.all([
+    env.DB
+      .prepare(`SELECT 1 AS x FROM raffle_entries WHERE line_user_id = ?`)
+      .bind(user.userId)
+      .first(),
+    total(env),
+    env.DB
+      .prepare(`SELECT value FROM settings WHERE key = 'raffle_mode'`)
+      .first<{ value: string }>(),
+    // raffle_draws.prize is a name snapshot taken at draw time (see
+    // migrations/0002_raffle.sql), so this already resolves to the prize
+    // name without a join to raffle_prizes.
+    env.DB
+      .prepare(
+        `SELECT prize FROM raffle_draws
+         WHERE winner_id = ? AND status = 'active'
+         ORDER BY id DESC LIMIT 1`
+      )
+      .bind(user.userId)
+      .first<{ prize: string }>(),
+  ])
+  return ok({
+    entered: entered !== null,
+    total: totalN,
+    mode: modeRow?.value === 'on' ? 'on' : 'off',
+    win: winRow ? { prizeName: winRow.prize } : null,
+  })
 }
 
 export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {

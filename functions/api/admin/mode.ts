@@ -1,6 +1,11 @@
 // POST /api/admin/mode  with body { mode: 'auto' | 'manual' }
 // Flips the global moderation_mode setting. 'manual' demotes all NEW
-// messages to 'pending'; existing 'approved' rows stay as they are.
+// messages to 'pending'; existing 'approved' rows stay as they are. This
+// same flag gates decideStatus() for photo commits too (see
+// functions/_lib/moderation.ts), so flipping it also governs new photo
+// uploads — there is no separate demote-on-flip pass to mirror here: an
+// already-visible photo, like an already-approved message, is left alone
+// when the mode flips to 'manual'.
 
 import { err, ok, readJson } from '../../_lib/http'
 import { LiffAuthError } from '../../_lib/liff-verify'

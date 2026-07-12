@@ -10,43 +10,83 @@
 // the entry form collects 真實姓名 (required) + 飲食需求 before submit,
 // same shape as /liff/join. Already-identified guests skip the form
 // entirely (「已知就跳過」) and get the original one-tap flow.
+//
+// GET /api/raffle is polled every 5s (both before and after entering) so a
+// guest who stepped away from their phone still finds out they won, and the
+// entrant count + raffle-mode banner stay live without a manual refresh.
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useLiffProfile } from '@/lib/liff'
 import { getLiffIdToken } from '@/lib/liff-token'
 import { DIET_OPTIONS } from '@/lib/diet'
+import { Spinner, StatusBanner } from '@/components/ui'
 
 type MeResponse = { ok?: boolean; identified?: boolean }
+type RaffleResponse = {
+  ok?: boolean
+  entered?: boolean
+  total?: number
+  mode?: 'on' | 'off'
+  win?: { prizeName: string } | null
+}
 type FormState = { realName: string; diet: string }
 const initialForm: FormState = { realName: '', diet: DIET_OPTIONS[0] }
+const POLL_MS = 5000
 
 export default function RaffleLiffPage() {
   const liffId = process.env.NEXT_PUBLIC_LIFF_ID_RAFFLE
   const state = useLiffProfile(liffId)
   const [entered, setEntered] = useState<boolean | null>(null)
   const [totalCount, setTotalCount] = useState<number | null>(null)
+  const [mode, setMode] = useState<'on' | 'off'>('off')
+  const [win, setWin] = useState<{ prizeName: string } | null>(null)
   const [identified, setIdentified] = useState<boolean | null>(null)
   const [form, setForm] = useState<FormState>(initialForm)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const stopPollRef = useRef(false)
 
-  // Load current entry status + identity once LIFF identity is ready.
+  // Raffle status poll: entrant count, raffle-mode banner, and the win
+  // reveal all need to keep updating on their own — a guest who won might
+  // be at the buffet, not staring at this page.
+  useEffect(() => {
+    if (state.status !== 'ready') return
+    stopPollRef.current = false
+
+    async function poll() {
+      if (stopPollRef.current) return
+      try {
+        const idToken = await getLiffIdToken()
+        if (idToken) {
+          const res = await fetch('/api/raffle', { headers: { 'x-line-id-token': idToken } })
+          const data = await res.json() as RaffleResponse
+          if (res.ok && data.ok) {
+            setEntered(!!data.entered)
+            setTotalCount(data.total ?? null)
+            setMode(data.mode === 'on' ? 'on' : 'off')
+            setWin(data.win ?? null)
+          }
+        }
+      } catch {
+        // Transient — next tick retries; never blank the page over a blip.
+      }
+      if (!stopPollRef.current) setTimeout(poll, POLL_MS)
+    }
+    poll()
+
+    return () => { stopPollRef.current = true }
+  }, [state.status])
+
+  // Identity check runs once, independent of the raffle poll above.
   useEffect(() => {
     if (state.status !== 'ready') return
     ;(async () => {
       try {
         const idToken = await getLiffIdToken()
         if (!idToken) throw new Error('LINE 登入逾時，請重新進入。')
-        const [raffleRes, meRes] = await Promise.all([
-          fetch('/api/raffle', { headers: { 'x-line-id-token': idToken } }),
-          fetch('/api/identity/me', { headers: { 'x-line-id-token': idToken } }),
-        ])
-        const raffleData = await raffleRes.json() as { ok?: boolean; entered?: boolean; total?: number }
-        if (!raffleRes.ok || !raffleData.ok) throw new Error(`HTTP ${raffleRes.status}`)
+        const meRes = await fetch('/api/identity/me', { headers: { 'x-line-id-token': idToken } })
         const meData = await meRes.json() as MeResponse
         if (!meRes.ok || !meData.ok) throw new Error(`HTTP ${meRes.status}`)
-        setEntered(!!raffleData.entered)
-        setTotalCount(raffleData.total ?? null)
         setIdentified(!!meData.identified)
       } catch (e) {
         setError(e instanceof Error ? e.message : '載入失敗，請稍後再試')
@@ -89,7 +129,7 @@ export default function RaffleLiffPage() {
   }
 
   if (state.status === 'loading') {
-    return <Centered><p className="text-ink/60">載入中…</p></Centered>
+    return <Centered><Spinner /></Centered>
   }
   if (state.status === 'error') {
     return <Centered>
@@ -107,6 +147,19 @@ export default function RaffleLiffPage() {
         <h1 className="mt-2 text-2xl">婚禮抽獎</h1>
         <p className="mt-3 text-sm text-ink/60">嗨，{profile.displayName}</p>
       </header>
+
+      {win && (
+        <div className="mb-6">
+          <StatusBanner kind="success">
+            🎉 恭喜中獎：{win.prizeName}！請到主桌附近找工作人員領獎。
+          </StatusBanner>
+        </div>
+      )}
+      {mode === 'on' && !win && (
+        <div className="mb-6">
+          <StatusBanner kind="info">抽獎進行中，請盯著大螢幕！</StatusBanner>
+        </div>
+      )}
 
       {entered === true ? (
         <div>
@@ -129,6 +182,7 @@ export default function RaffleLiffPage() {
             <Field label="你的真實姓名">
               <input
                 type="text" required className="field-input"
+                name="realName" autoComplete="name"
                 value={form.realName}
                 onChange={e => setForm({ ...form, realName: e.target.value })}
               />
@@ -140,7 +194,7 @@ export default function RaffleLiffPage() {
                 options={[...DIET_OPTIONS]}
               />
             </Field>
-            {error && <p className="text-red-600 text-sm">{error}</p>}
+            {error && <StatusBanner kind="error">{error}</StatusBanner>}
             <button
               type="submit"
               disabled={submitting || !form.realName.trim()}
@@ -159,7 +213,11 @@ export default function RaffleLiffPage() {
             一鍵報名，用你的 LINE 身分參加。
             <br />每人一票，中獎需在現場領獎。
           </p>
-          {error && <p className="mt-4 text-red-600 text-sm">{error}</p>}
+          {error && (
+            <div className="mt-4">
+              <StatusBanner kind="error">{error}</StatusBanner>
+            </div>
+          )}
           <button
             className="btn-primary mt-8 w-full"
             disabled={submitting || entered === null || identified === null}
@@ -193,7 +251,7 @@ function Select({
   value, onChange, options,
 }: { value: string; onChange: (v: string) => void; options: string[] }) {
   return (
-    <select className="field-input" value={value} onChange={e => onChange(e.target.value)}>
+    <select className="field-input" name="diet" value={value} onChange={e => onChange(e.target.value)}>
       {options.map(o => <option key={o} value={o}>{o}</option>)}
     </select>
   )

@@ -1,5 +1,5 @@
-// GET /api/admin/raffle — raffle mode + entrant count + prize list (with
-// remaining stock) + full draw history (audit log).
+// GET /api/admin/raffle — raffle mode (+ when it was turned on) + entrant
+// count + prize list (with remaining stock) + full draw history (audit log).
 
 import { err, ok } from '../../../_lib/http'
 import { LiffAuthError } from '../../../_lib/liff-verify'
@@ -19,9 +19,10 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
     throw e
   }
 
-  const [countRow, modeRow, prizesRes, drawsRes] = await Promise.all([
+  const [countRow, modeRow, startedAtRow, prizesRes, drawsRes] = await Promise.all([
     env.DB.prepare(`SELECT COUNT(*) AS n FROM raffle_entries`).first<{ n: number }>(),
     env.DB.prepare(`SELECT value FROM settings WHERE key = 'raffle_mode'`).first<{ value: string }>(),
+    env.DB.prepare(`SELECT value FROM settings WHERE key = 'raffle_mode_started_at'`).first<{ value: string }>(),
     env.DB
       .prepare(
         `SELECT p.id, p.name, p.quantity, p.sort_order,
@@ -40,6 +41,7 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
 
   return ok({
     mode: modeRow?.value === 'on' ? 'on' : 'off',
+    modeStartedAt: startedAtRow?.value ? Number(startedAtRow.value) : null,
     total: countRow?.n ?? 0,
     prizes: (prizesRes.results ?? []).map(p => ({
       id: p.id,

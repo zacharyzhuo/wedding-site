@@ -6,6 +6,10 @@
 //   1. R2 free tier is 10 GB total. Originals would exceed it; resized
 //      ≤ 500 KB stays well under. See interactive-features.md.
 //   2. Faster uploads on mobile data, which most guests will be on.
+//
+// Errors are thrown as .code-style identifiers (e.g. `DECODE_FAILED`)
+// rather than English prose — src/lib/upload-errors.ts maps them to
+// guest-facing zh-Hant copy; this module doesn't own display text.
 
 const MAX_EDGE = 2048
 const JPEG_QUALITY = 0.8
@@ -32,7 +36,7 @@ async function loadBitmap(file: File): Promise<ImageBitmap | HTMLImageElement> {
   return new Promise<HTMLImageElement>((resolve, reject) => {
     const img = new Image()
     img.onload = () => resolve(img)
-    img.onerror = () => reject(new Error('image decode failed'))
+    img.onerror = () => reject(new Error('DECODE_FAILED'))
     img.src = URL.createObjectURL(file)
   })
 }
@@ -48,25 +52,25 @@ export async function resizeForUpload(file: File): Promise<ResizeResult> {
   const source = await loadBitmap(file)
   const srcW = 'width' in source ? source.width : 0
   const srcH = 'height' in source ? source.height : 0
-  if (!srcW || !srcH) throw new Error('image has no dimensions')
+  if (!srcW || !srcH) throw new Error('DECODE_FAILED')
 
   const { tw, th } = targetSize(srcW, srcH)
   const canvas = document.createElement('canvas')
   canvas.width = tw
   canvas.height = th
   const ctx = canvas.getContext('2d')
-  if (!ctx) throw new Error('canvas 2d unavailable')
+  if (!ctx) throw new Error('CANVAS_UNAVAILABLE')
   ctx.drawImage(source as CanvasImageSource, 0, 0, tw, th)
 
   const blob = await new Promise<Blob | null>(resolve =>
     canvas.toBlob(resolve, 'image/jpeg', JPEG_QUALITY)
   )
-  if (!blob) throw new Error('canvas encode failed')
+  if (!blob) throw new Error('ENCODE_FAILED')
 
   if (blob.size > HARD_CAP_BYTES) {
     // Defensive — if a very high-res still produces > 2 MB after resize,
     // reject rather than push past the quota.
-    throw new Error(`圖片仍過大（${Math.round(blob.size / 1024)} KB），請換一張`)
+    throw new Error('TOO_LARGE')
   }
 
   return {

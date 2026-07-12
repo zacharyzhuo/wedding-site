@@ -1,15 +1,21 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useLiffProfile } from '@/lib/liff'
 import { getLiffIdToken } from '@/lib/liff-token'
-import { DIET_OPTIONS } from '@/lib/diet'
+import { DIET_OPTIONS, buildDietValue, needsDietDetail, splitDietDetail } from '@/lib/diet'
 import { toSvgMarkup } from '@/lib/qr'
+import { Field, SelectField, Spinner, StatusBanner, Card } from '@/components/ui'
+
+const GENERIC_ERROR = '送出失敗，請稍後再試，或直接聯絡新人'
 
 // Field shape follows the party-identity field model (§4.5): the leader
 // submits party-level fields (side/relationship/attending/counts/notes) plus
 // their own identity (realName/leaderDiet). The rest of the party joins
 // later via the share link this form returns — see joinUrl in ShareBlock.
+// leaderDiet always holds a bare DIET_OPTIONS value (never the merged
+// "食物過敏（花生）" form) — leaderDietDetail carries the free text
+// separately, merged via buildDietValue only at submit time.
 type FormState = {
   realName: string
   side: '男方' | '女方' | ''
@@ -19,6 +25,7 @@ type FormState = {
   childCount: string
   childSeatCount: string
   leaderDiet: string
+  leaderDietDetail: string
   notes: string
   message: string
 }
@@ -27,8 +34,10 @@ const initial: FormState = {
   realName: '',
   side: '', relationship: '', attending: '',
   adultCount: '1', childCount: '0', childSeatCount: '0',
-  leaderDiet: '無特殊需求', notes: '', message: '',
+  leaderDiet: '無特殊需求', leaderDietDetail: '', notes: '', message: '',
 }
+
+type FieldErrors = Partial<Record<'realName' | 'side' | 'relationship' | 'attending', string>>
 
 type MeResponse = {
   ok?: boolean
@@ -60,8 +69,8 @@ type MeResponse = {
 type MeCheck =
   | { status: 'checking' }
   | { status: 'leader-form' }
-  | { status: 'leader-done'; joinUrl: string }
-  | { status: 'member'; leaderName: string | null; diet: string | null }
+  | { status: 'leader-done'; joinUrl: string; attending: string }
+  | { status: 'member'; leaderName: string | null; diet: string | null; realName: string | null }
 
 export default function RsvpLiffPage() {
   const liffId = process.env.NEXT_PUBLIC_LIFF_ID_RSVP
@@ -69,6 +78,12 @@ export default function RsvpLiffPage() {
   const [form, setForm] = useState<FormState>(initial)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [fieldErrors, setFieldErrors] = useState<FieldErrors>({})
+
+  const realNameRef = useRef<HTMLInputElement>(null)
+  const sideRef = useRef<HTMLSelectElement>(null)
+  const relationshipRef = useRef<HTMLSelectElement>(null)
+  const attendingRef = useRef<HTMLSelectElement>(null)
 
   const [meCheck, setMeCheck] = useState<MeCheck>({ status: 'checking' })
   const [meCheckError, setMeCheckError] = useState<string | null>(null)
@@ -76,7 +91,8 @@ export default function RsvpLiffPage() {
   // this lets them opt back into the form to revise their answers.
   const [forceForm, setForceForm] = useState(false)
   // The leader's own submitted answers, so tapping "edit" pre-fills the form
-  // instead of making them re-type everything.
+  // instead of making them re-type everything. Also doubles as the "is there
+  // a previous answer to cancel back to" flag for the edit form's 取消 link.
   const [leaderPrefill, setLeaderPrefill] = useState<FormState | null>(null)
 
   useEffect(() => {
@@ -88,10 +104,15 @@ export default function RsvpLiffPage() {
         if (!idToken) throw new Error('LINE 登入逾時，請重新進入。')
         const res = await fetch('/api/identity/me', { headers: { 'x-line-id-token': idToken } })
         const data = await res.json() as MeResponse
-        if (!res.ok || !data.ok) throw new Error(data.error ?? `HTTP ${res.status}`)
+        if (!res.ok || !data.ok) throw new Error(data.error ?? GENERIC_ERROR)
         if (cancelled) return
         if (data.role === 'member') {
-          setMeCheck({ status: 'member', leaderName: data.party?.leaderName ?? null, diet: data.diet ?? null })
+          setMeCheck({
+            status: 'member',
+            leaderName: data.party?.leaderName ?? null,
+            diet: data.diet ?? null,
+            realName: data.realName ?? null,
+          })
         } else if (data.role === 'leader' && data.party?.partyId) {
           // Leader already created their party — re-opening RSVP should surface
           // the share link again, not a blank form. Build the join URL the same
@@ -99,6 +120,7 @@ export default function RsvpLiffPage() {
           // answers so an edit pre-fills the form.
           const joinLiffId = process.env.NEXT_PUBLIC_LIFF_ID_JOIN
           const p = data.party
+          const { base: dietBase, detail: dietDetail } = splitDietDetail(data.diet || '無特殊需求')
           setLeaderPrefill({
             realName: data.realName ?? '',
             side: (p.side as FormState['side']) ?? '',
@@ -107,11 +129,16 @@ export default function RsvpLiffPage() {
             adultCount: String(p.adultCount ?? 1),
             childCount: String(p.childCount ?? 0),
             childSeatCount: String(p.childSeatCount ?? 0),
-            leaderDiet: data.diet || '無特殊需求',
+            leaderDiet: dietBase,
+            leaderDietDetail: dietDetail,
             notes: p.notes ?? '',
             message: p.message ?? '',
           })
-          setMeCheck({ status: 'leader-done', joinUrl: `https://liff.line.me/${joinLiffId}?party=${p.partyId}` })
+          setMeCheck({
+            status: 'leader-done',
+            joinUrl: `https://liff.line.me/${joinLiffId}?party=${p.partyId}`,
+            attending: p.attending ?? '出席',
+          })
         } else {
           setMeCheck({ status: 'leader-form' })
         }
@@ -123,7 +150,7 @@ export default function RsvpLiffPage() {
   }, [state.status])
 
   if (state.status === 'loading') {
-    return <Centered><p className="text-ink/60">載入中…</p></Centered>
+    return <Centered><Spinner /></Centered>
   }
   if (state.status === 'error') {
     return <Centered>
@@ -138,15 +165,22 @@ export default function RsvpLiffPage() {
     </Centered>
   }
   if (meCheck.status === 'checking') {
-    return <Centered><p className="text-ink/60">確認身分中…</p></Centered>
+    return <Centered><Spinner label="確認身分中…" /></Centered>
   }
   if (meCheck.status === 'member') {
-    return <MemberDedupView leaderName={meCheck.leaderName} initialDiet={meCheck.diet} />
+    return (
+      <MemberDedupView
+        leaderName={meCheck.leaderName}
+        initialDiet={meCheck.diet}
+        initialRealName={meCheck.realName}
+      />
+    )
   }
   if (meCheck.status === 'leader-done' && !forceForm) {
     return (
       <LeaderDoneView
         joinUrl={meCheck.joinUrl}
+        attending={meCheck.attending}
         onEdit={() => { if (leaderPrefill) setForm(leaderPrefill); setForceForm(true) }}
       />
     )
@@ -154,9 +188,30 @@ export default function RsvpLiffPage() {
 
   const profile = state.profile
 
+  function validate(): boolean {
+    const next: FieldErrors = {}
+    if (!form.realName.trim()) next.realName = '請輸入姓名'
+    if (!form.side) next.side = '請選擇您是男方或女方的賓客'
+    if (!form.relationship) next.relationship = '請選擇與新人的關係'
+    if (!form.attending) next.attending = '請選擇是否出席'
+    setFieldErrors(next)
+
+    const order: Array<[keyof FieldErrors, React.RefObject<HTMLElement | null>]> = [
+      ['realName', realNameRef], ['side', sideRef], ['relationship', relationshipRef], ['attending', attendingRef],
+    ]
+    const firstInvalid = order.find(([key]) => next[key])
+    if (firstInvalid) {
+      setError(next[firstInvalid[0]]!)
+      firstInvalid[1].current?.focus()
+      return false
+    }
+    setError(null)
+    return true
+  }
+
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault()
-    setError(null)
+    if (!validate()) return
     setSubmitting(true)
     try {
       const idToken = await getLiffIdToken()
@@ -167,20 +222,21 @@ export default function RsvpLiffPage() {
         body: JSON.stringify({
           source: 'liff',
           ...form,
+          leaderDiet: buildDietValue(form.leaderDiet, form.leaderDietDetail),
           adultCount: Number(form.adultCount) || 1,
           childCount: Number(form.childCount) || 0,
           childSeatCount: Number(form.childSeatCount) || 0,
         }),
       })
       const data = await res.json() as { ok?: boolean; joinUrl?: string; error?: string }
-      if (!res.ok || !data.ok) throw new Error(data.error ?? `HTTP ${res.status}`)
+      if (!res.ok || !data.ok) throw new Error(data.error ?? GENERIC_ERROR)
       // Route straight to the leader "done" view (share link + live progress);
       // remember what was just submitted so a follow-up edit pre-fills.
       setLeaderPrefill(form)
       setForceForm(false)
-      setMeCheck({ status: 'leader-done', joinUrl: data.joinUrl ?? '' })
+      setMeCheck({ status: 'leader-done', joinUrl: data.joinUrl ?? '', attending: form.attending })
     } catch (e) {
-      setError(e instanceof Error ? e.message : '送出失敗，請稍後再試')
+      setError(e instanceof Error ? e.message : GENERIC_ERROR)
     } finally {
       setSubmitting(false)
     }
@@ -196,51 +252,65 @@ export default function RsvpLiffPage() {
         </p>
       </header>
 
-      <form onSubmit={onSubmit} className="space-y-5">
-        <Field label="你的真實姓名">
+      <form onSubmit={onSubmit} className="space-y-5" noValidate>
+        <Field label="你的真實姓名" error={fieldErrors.realName}>
           <input
-            type="text" required className="field-input"
+            ref={realNameRef}
+            type="text" name="realName" autoComplete="name" className="field-input"
             value={form.realName}
             onChange={e => setForm({ ...form, realName: e.target.value })}
           />
         </Field>
 
-        <Field label="您是男方還是女方的賓客？">
-          <Select
+        <Field label="您是男方還是女方的賓客？" error={fieldErrors.side}>
+          <select
+            ref={sideRef} name="side" autoComplete="off" className="field-input"
             value={form.side}
-            onChange={v => setForm({ ...form, side: v as FormState['side'] })}
-            options={['男方', '女方']}
-          />
+            onChange={e => setForm({ ...form, side: e.target.value as FormState['side'] })}
+          >
+            <option value="">請選擇</option>
+            <option value="男方">男方</option>
+            <option value="女方">女方</option>
+          </select>
         </Field>
 
-        <Field label="與新人的關係">
-          <Select
+        <Field label="與新人的關係" error={fieldErrors.relationship}>
+          <select
+            ref={relationshipRef} name="relationship" autoComplete="off" className="field-input"
             value={form.relationship}
-            onChange={v => setForm({ ...form, relationship: v as FormState['relationship'] })}
-            options={['家長', '親戚', '朋友']}
-          />
+            onChange={e => setForm({ ...form, relationship: e.target.value as FormState['relationship'] })}
+          >
+            <option value="">請選擇</option>
+            <option value="家長">家長</option>
+            <option value="親戚">親戚</option>
+            <option value="朋友">朋友</option>
+          </select>
         </Field>
 
-        <Field label="是否出席">
-          <Select
+        <Field label="是否出席" error={fieldErrors.attending}>
+          <select
+            ref={attendingRef} name="attending" autoComplete="off" className="field-input"
             value={form.attending}
-            onChange={v => setForm({ ...form, attending: v as FormState['attending'] })}
-            options={['出席', '不克出席']}
-          />
+            onChange={e => setForm({ ...form, attending: e.target.value as FormState['attending'] })}
+          >
+            <option value="">請選擇</option>
+            <option value="出席">出席</option>
+            <option value="不克出席">不克出席</option>
+          </select>
         </Field>
 
         {form.attending === '出席' && (
           <>
             <Field label="大人人數（含本人）">
               <input
-                type="number" min={1} className="field-input"
+                type="number" name="adultCount" autoComplete="off" min={1} className="field-input"
                 value={form.adultCount}
                 onChange={e => setForm({ ...form, adultCount: e.target.value })}
               />
             </Field>
             <Field label="兒童人數">
               <input
-                type="number" min={0} className="field-input"
+                type="number" name="childCount" autoComplete="off" min={0} className="field-input"
                 value={form.childCount}
                 onChange={e => {
                   const childCount = e.target.value
@@ -255,18 +325,27 @@ export default function RsvpLiffPage() {
             </Field>
             <Field label="其中需要兒童椅">
               <input
-                type="number" min={0} max={Number(form.childCount) || 0} className="field-input"
+                type="number" name="childSeatCount" autoComplete="off"
+                min={0} max={Number(form.childCount) || 0} className="field-input"
                 value={form.childSeatCount}
                 onChange={e => setForm({ ...form, childSeatCount: e.target.value })}
               />
             </Field>
-            <Field label="你的飲食需求">
-              <Select
-                value={form.leaderDiet}
-                onChange={v => setForm({ ...form, leaderDiet: v })}
-                options={[...DIET_OPTIONS]}
-              />
-            </Field>
+            <SelectField
+              label="你的飲食需求" name="leaderDiet"
+              value={form.leaderDiet}
+              onChange={v => setForm({ ...form, leaderDiet: v, leaderDietDetail: needsDietDetail(v) ? form.leaderDietDetail : '' })}
+              options={DIET_OPTIONS.map(o => ({ value: o, label: o }))}
+            />
+            {needsDietDetail(form.leaderDiet) && (
+              <Field label="過敏原或其他說明（會轉達給餐廳）">
+                <input
+                  type="text" name="leaderDietDetail" autoComplete="off" className="field-input"
+                  value={form.leaderDietDetail}
+                  onChange={e => setForm({ ...form, leaderDietDetail: e.target.value })}
+                />
+              </Field>
+            )}
           </>
         )}
 
@@ -275,7 +354,7 @@ export default function RsvpLiffPage() {
           hint="會用 LINE 的大人，等一下把你拿到的連結傳給他，讓他自己加入就好。這欄只填「不會用 LINE、需要你代填」的人（例如長輩、小孩）：他們的姓名、素食／過敏、兒童餐或兒童椅需求。"
         >
           <textarea
-            rows={3} className="field-input"
+            rows={3} name="notes" autoComplete="off" className="field-input"
             placeholder="例：我爸媽兩位不用 LINE，都吃素；小孩 1 位要兒童餐 + 兒童椅"
             value={form.notes}
             onChange={e => setForm({ ...form, notes: e.target.value })}
@@ -284,42 +363,59 @@ export default function RsvpLiffPage() {
 
         <Field label="想對新人說的話">
           <textarea
-            rows={3} className="field-input"
+            rows={3} name="message" autoComplete="off" className="field-input"
             value={form.message}
             onChange={e => setForm({ ...form, message: e.target.value })}
           />
         </Field>
 
-        {error && <p className="text-red-600 text-sm">{error}</p>}
+        {error && <StatusBanner kind="error">{error}</StatusBanner>}
 
-        <button
-          type="submit"
-          disabled={submitting || !form.realName || !form.side || !form.relationship || !form.attending}
-          className="btn-primary w-full"
-        >
+        <button type="submit" disabled={submitting} className="btn-primary w-full">
           {submitting ? '送出中…' : '送出回覆'}
         </button>
+
+        {forceForm && leaderPrefill && (
+          <button
+            type="button"
+            className="block w-full text-center text-sm text-ink/50 underline underline-offset-4"
+            onClick={() => { setForceForm(false); setFieldErrors({}); setError(null) }}
+          >
+            取消
+          </button>
+        )}
       </form>
     </main>
   )
 }
 
 // Shown to a party MEMBER instead of the leader form (see MeCheck above):
-// the leader already answered for the whole party, so all this guest needs
-// is a way to keep their own diet up to date.
+// the leader already answered for the whole party, so this guest just keeps
+// their own diet and (per contract 4) their own name up to date.
 function MemberDedupView({
-  leaderName, initialDiet,
-}: { leaderName: string | null; initialDiet: string | null }) {
-  const validInitialDiet = initialDiet && (DIET_OPTIONS as readonly string[]).includes(initialDiet)
-    ? initialDiet
-    : DIET_OPTIONS[0]
+  leaderName, initialDiet, initialRealName,
+}: { leaderName: string | null; initialDiet: string | null; initialRealName: string | null }) {
+  const { base: initialBase, detail: initialDetail } = splitDietDetail(initialDiet || '無特殊需求')
+  const validInitialDiet = (DIET_OPTIONS as readonly string[]).includes(initialBase) ? initialBase : DIET_OPTIONS[0]
   const [diet, setDiet] = useState(validInitialDiet)
+  const [dietDetail, setDietDetail] = useState(initialDetail)
+  const [realName, setRealName] = useState(initialRealName ?? '')
   const [submitting, setSubmitting] = useState(false)
   const [savedMsg, setSavedMsg] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [nameError, setNameError] = useState<string | undefined>(undefined)
+  const realNameRef = useRef<HTMLInputElement>(null)
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault()
+    const trimmedName = realName.trim()
+    if (!trimmedName) {
+      setNameError('請輸入姓名')
+      setError('請輸入姓名')
+      realNameRef.current?.focus()
+      return
+    }
+    setNameError(undefined)
     setError(null)
     setSavedMsg(null)
     setSubmitting(true)
@@ -329,13 +425,13 @@ function MemberDedupView({
       const res = await fetch('/api/party/member-diet', {
         method: 'POST',
         headers: { 'content-type': 'application/json', 'x-line-id-token': idToken },
-        body: JSON.stringify({ diet }),
+        body: JSON.stringify({ diet: buildDietValue(diet, dietDetail), realName: trimmedName }),
       })
       const data = await res.json() as { ok?: boolean; diet?: string; error?: string }
-      if (!res.ok || !data.ok) throw new Error(data.error ?? `HTTP ${res.status}`)
-      setSavedMsg('已更新你的飲食需求 ❤')
+      if (!res.ok || !data.ok) throw new Error(data.error ?? GENERIC_ERROR)
+      setSavedMsg('已更新你的資料 ❤')
     } catch (e) {
-      setError(e instanceof Error ? e.message : '送出失敗，請稍後再試')
+      setError(e instanceof Error ? e.message : GENERIC_ERROR)
     } finally {
       setSubmitting(false)
     }
@@ -348,13 +444,33 @@ function MemberDedupView({
       </h1>
       <p className="mt-4 text-ink/70">期待 2027/06/05 與您相見。</p>
 
-      <form onSubmit={onSubmit} className="mt-10 space-y-5 text-left">
-        <Field label="更新我的飲食需求">
-          <Select value={diet} onChange={setDiet} options={[...DIET_OPTIONS]} includeBlank={false} />
+      <form onSubmit={onSubmit} className="mt-10 space-y-5 text-left" noValidate>
+        <Field label="真實姓名" error={nameError}>
+          <input
+            ref={realNameRef}
+            type="text" name="realName" autoComplete="name" className="field-input"
+            value={realName}
+            onChange={e => setRealName(e.target.value)}
+          />
         </Field>
 
-        {error && <p className="text-red-600 text-sm">{error}</p>}
-        {savedMsg && <p className="text-sm text-ink/70">{savedMsg}</p>}
+        <SelectField
+          label="更新我的飲食需求" name="diet" value={diet}
+          onChange={v => { setDiet(v); if (!needsDietDetail(v)) setDietDetail('') }}
+          options={DIET_OPTIONS.map(o => ({ value: o, label: o }))}
+        />
+        {needsDietDetail(diet) && (
+          <Field label="過敏原或其他說明（會轉達給餐廳）">
+            <input
+              type="text" name="dietDetail" autoComplete="off" className="field-input"
+              value={dietDetail}
+              onChange={e => setDietDetail(e.target.value)}
+            />
+          </Field>
+        )}
+
+        {error && <StatusBanner kind="error">{error}</StatusBanner>}
+        {savedMsg && <StatusBanner kind="success">{savedMsg}</StatusBanner>}
 
         <button type="submit" disabled={submitting} className="btn-primary w-full">
           {submitting ? '送出中…' : '更新'}
@@ -364,12 +480,31 @@ function MemberDedupView({
   )
 }
 
-// Shown once the leader's RSVP is recorded. joinUrl carries the party code;
-// sharing it (via LINE's native picker, a copied link, or the QR) is how the
-// rest of the party gets added without re-typing the leader's answers.
-// Shown to a leader who has already submitted (re-opening RSVP), so their
-// share link is one tap away instead of buried behind re-filling the form.
-function LeaderDoneView({ joinUrl, onEdit }: { joinUrl: string; onEdit: () => void }) {
+// Shown once the leader's RSVP is recorded. A not-attending leader gets a
+// simple thanks view (pinned copy, no share link or progress — there's
+// nothing to coordinate) but keeps the edit entry in case plans change.
+function LeaderDoneView({
+  joinUrl, attending, onEdit,
+}: { joinUrl: string; attending: string; onEdit: () => void }) {
+  if (attending === '不克出席') {
+    return (
+      <main className="mx-auto max-w-md px-6 py-16 text-center">
+        <h1 className="text-2xl">已收到你的回覆</h1>
+        <p className="mt-4 text-ink/70">謝謝你特地告訴我們。若之後可以出席，隨時回來修改回覆。</p>
+        <button type="button" className="btn-outline mt-8" onClick={onEdit}>
+          需要修改回覆？重新填寫
+        </button>
+      </main>
+    )
+  }
+
+  return <AttendingDoneView joinUrl={joinUrl} onEdit={onEdit} />
+}
+
+// Shown to a leader who has already submitted (re-opening RSVP) and is
+// attending, so their share link is one tap away instead of buried behind
+// re-filling the form.
+function AttendingDoneView({ joinUrl, onEdit }: { joinUrl: string; onEdit: () => void }) {
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null)
   const [refreshing, setRefreshing] = useState(false)
 
@@ -392,13 +527,24 @@ function LeaderDoneView({ joinUrl, onEdit }: { joinUrl: string; onEdit: () => vo
 
   useEffect(() => { loadProgress() }, [loadProgress])
 
+  // Guests often background the LIFF app while sharing the link elsewhere
+  // (LINE's own picker, a chat) and come back later — refetch so the count
+  // isn't stale without needing the manual button every time.
+  useEffect(() => {
+    function onVisible() {
+      if (document.visibilityState === 'visible') loadProgress()
+    }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => document.removeEventListener('visibilitychange', onVisible)
+  }, [loadProgress])
+
   return (
     <main className="mx-auto max-w-md px-6 py-16 text-center">
       <h1 className="text-2xl">你的回覆已送出 ❤</h1>
       <p className="mt-4 text-ink/70">把下面的連結傳給同行的人，他們加入就完成登記。</p>
 
       {progress && (
-        <div className="mt-6 rounded-2xl border border-champagne bg-white/70 p-5">
+        <Card className="mt-6">
           <p className="text-sm text-ink/60">同行大人 LINE 登記進度</p>
           <p className="mt-1 font-serif text-4xl text-ink">
             {progress.done}<span className="mx-1 text-ink/30">/</span>{progress.total}
@@ -414,7 +560,7 @@ function LeaderDoneView({ joinUrl, onEdit }: { joinUrl: string; onEdit: () => vo
           >
             {refreshing ? '更新中…' : '重新整理進度'}
           </button>
-        </div>
+        </Card>
       )}
 
       <ShareBlock joinUrl={joinUrl} />
@@ -470,7 +616,7 @@ function ShareBlock({ joinUrl }: { joinUrl: string }) {
   }
 
   return (
-    <div className="mt-10 rounded-2xl border border-champagne bg-white/70 p-6">
+    <Card className="mt-10">
       <p className="text-ink/80">
         把這個連結傳給同行的人，他們加入就完成登記
       </p>
@@ -491,32 +637,7 @@ function ShareBlock({ joinUrl }: { joinUrl: string }) {
           dangerouslySetInnerHTML={{ __html: qrSvg }}
         />
       )}
-    </div>
-  )
-}
-
-function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
-  return (
-    <label className="block">
-      <span className="field-label">{label}</span>
-      {hint && <span className="mt-1 mb-1 block text-xs leading-relaxed text-ink/50">{hint}</span>}
-      {children}
-    </label>
-  )
-}
-
-function Select({
-  value, onChange, options, includeBlank = true,
-}: { value: string; onChange: (v: string) => void; options: string[]; includeBlank?: boolean }) {
-  return (
-    <select
-      className="field-input"
-      value={value}
-      onChange={e => onChange(e.target.value)}
-    >
-      {includeBlank && <option value="">請選擇</option>}
-      {options.map(o => <option key={o} value={o}>{o}</option>)}
-    </select>
+    </Card>
   )
 }
 

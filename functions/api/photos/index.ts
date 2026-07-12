@@ -43,15 +43,23 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
 
   const now = Date.now()
 
+  // One moderation decision drives BOTH the photo's own status and (if a
+  // caption rides along) the danmaku row's status — same helper danmaku.ts
+  // uses, so a photo demoted for its caption's forbidden words (or manual
+  // mode) never slips onto the screen ungated. Empty caption still runs
+  // through decideStatus so manual-mode photos-without-captions are gated too.
+  const status = await decideStatus(caption, env)
+  const photoStatus: 'visible' | 'pending' = status === 'pending' ? 'pending' : 'visible'
+
   // Insert the photo first; the foreign key on danmaku.photo_id needs a real id.
   let photoId: number
   try {
     const result = await env.DB
       .prepare(
         `INSERT INTO photos (r2_key, uploader_id, uploader_name, caption, status, created_at)
-         VALUES (?, ?, ?, ?, 'visible', ?)`
+         VALUES (?, ?, ?, ?, ?, ?)`
       )
-      .bind(key, user.userId, user.displayName, caption || null, now)
+      .bind(key, user.userId, user.displayName, caption || null, photoStatus, now)
       .run()
     photoId = result.meta.last_row_id as number
   } catch (e) {
@@ -66,7 +74,6 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
   let danmakuId: number | null = null
   let captionPending = false
   if (caption) {
-    const status = await decideStatus(caption, env)
     captionPending = status === 'pending'
     const r = await env.DB
       .prepare(
@@ -83,5 +90,6 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
     photoId,
     danmakuId,
     captionPending,
+    status: photoStatus,
   })
 }

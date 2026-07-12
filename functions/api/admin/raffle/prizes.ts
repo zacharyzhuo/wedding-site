@@ -1,6 +1,8 @@
 // POST   /api/admin/raffle/prizes  with body { name, quantity } — add one.
-// DELETE /api/admin/raffle/prizes?id=<id> — remove one (past draws keep
-// their prize-name snapshot, so deleting a prize never rewrites history).
+// DELETE /api/admin/raffle/prizes?id=<id> — remove one. Rejected (400) if
+// any raffle_draws row still references this prize_id: past draws keep a
+// prize-name snapshot for display, but prize_id itself must stay resolvable
+// so a forfeited draw can still be redrawn against the same prize.
 
 import { err, ok, readJson } from '../../../_lib/http'
 import { LiffAuthError } from '../../../_lib/liff-verify'
@@ -28,10 +30,10 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
   const body = await readJson<Body>(request)
   const name = typeof body?.name === 'string' ? body.name.trim() : ''
   const quantity = Number(body?.quantity)
-  if (!name) return err(400, 'name required')
-  if (name.length > MAX_NAME_LEN) return err(400, `name too long (max ${MAX_NAME_LEN})`)
+  if (!name) return err(400, '請輸入獎項名稱')
+  if (name.length > MAX_NAME_LEN) return err(400, `獎項名稱過長（最多 ${MAX_NAME_LEN} 字）`)
   if (!Number.isInteger(quantity) || quantity < 1 || quantity > MAX_QTY) {
-    return err(400, `quantity must be 1–${MAX_QTY}`)
+    return err(400, `數量需為 1–${MAX_QTY} 的整數`)
   }
 
   const res = await env.DB
@@ -55,6 +57,12 @@ export const onRequestDelete: PagesFunction<Env> = async ({ request, env }) => {
 
   const id = Number(new URL(request.url).searchParams.get('id'))
   if (!Number.isInteger(id) || id <= 0) return err(400, 'invalid id')
+
+  const referenced = await env.DB
+    .prepare(`SELECT COUNT(*) AS n FROM raffle_draws WHERE prize_id = ?`)
+    .bind(id)
+    .first<{ n: number }>()
+  if ((referenced?.n ?? 0) > 0) return err(400, '此獎項已有抽獎紀錄，無法刪除')
 
   const res = await env.DB
     .prepare(`DELETE FROM raffle_prizes WHERE id = ?`)
