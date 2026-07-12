@@ -7,15 +7,16 @@
 //
 // Fallback identity: a guest can reach this page without ever RSVPing or
 // joining a party. We check GET /api/identity/me first — if not identified,
-// the entry form collects 真實姓名 (required) + 飲食需求 before submit,
+// the entry form collects 姓名 (required) + 飲食需求 before submit,
 // same shape as /liff/join. Already-identified guests skip the form
 // entirely (「已知就跳過」) and get the original one-tap flow.
 //
-// GET /api/raffle is polled every 5s (both before and after entering) so a
-// guest who stepped away from their phone still finds out they won, and the
-// entrant count + raffle-mode banner stay live without a manual refresh.
+// Status is fetched ONCE on load (entered? + entrant count + raffle-mode).
+// Winners are announced live on the venue screen and by the MC, not on this
+// page, so there is no polling — a guest who entered weeks ago at RSVP time
+// won't have this page open at draw time anyway.
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useLiffProfile } from '@/lib/liff'
 import { getLiffIdToken } from '@/lib/liff-token'
 import { DIET_OPTIONS, needsDietDetail, buildDietValue } from '@/lib/diet'
@@ -30,11 +31,9 @@ type RaffleResponse = {
   entered?: boolean
   total?: number
   mode?: 'on' | 'off'
-  win?: { prizeName: string } | null
 }
 type FormState = { realName: string; diet: string; dietDetail: string }
 const initialForm: FormState = { realName: '', diet: DIET_OPTIONS[0], dietDetail: '' }
-const POLL_MS = 5000
 
 export default function RaffleLiffPage() {
   const liffId = process.env.NEXT_PUBLIC_LIFF_ID_RAFFLE
@@ -42,55 +41,39 @@ export default function RaffleLiffPage() {
   const [entered, setEntered] = useState<boolean | null>(null)
   const [totalCount, setTotalCount] = useState<number | null>(null)
   const [mode, setMode] = useState<'on' | 'off'>('off')
-  const [win, setWin] = useState<{ prizeName: string } | null>(null)
   const [identified, setIdentified] = useState<boolean | null>(null)
   const [form, setForm] = useState<FormState>(initialForm)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const stopPollRef = useRef(false)
 
-  // Raffle status poll: entrant count, raffle-mode banner, and the win
-  // reveal all need to keep updating on their own — a guest who won might
-  // be at the buffet, not staring at this page.
-  useEffect(() => {
-    if (state.status !== 'ready') return
-    stopPollRef.current = false
-
-    async function poll() {
-      if (stopPollRef.current) return
-      try {
-        const idToken = await getLiffIdToken()
-        if (idToken) {
-          const res = await fetch('/api/raffle', { headers: { 'x-line-id-token': idToken } })
-          const data = await res.json() as RaffleResponse
-          if (res.ok && data.ok) {
-            setEntered(!!data.entered)
-            setTotalCount(data.total ?? null)
-            setMode(data.mode === 'on' ? 'on' : 'off')
-            setWin(data.win ?? null)
-          }
-        }
-      } catch {
-        // Transient — next tick retries; never blank the page over a blip.
-      }
-      if (!stopPollRef.current) setTimeout(poll, POLL_MS)
-    }
-    poll()
-
-    return () => { stopPollRef.current = true }
-  }, [state.status])
-
-  // Identity check runs once, independent of the raffle poll above.
+  // One-shot load: identity (to decide whether to prompt for a name) and
+  // raffle status (entered? / count / mode) fetched together, once.
   useEffect(() => {
     if (state.status !== 'ready') return
     ;(async () => {
       try {
         const idToken = await getLiffIdToken()
         if (!idToken) throw new Error(LINE_TIMEOUT_MSG)
-        const meRes = await fetch('/api/identity/me', { headers: { 'x-line-id-token': idToken } })
+        const [meRes, raffleRes] = await Promise.all([
+          fetch('/api/identity/me', { headers: { 'x-line-id-token': idToken } }),
+          fetch('/api/raffle', { headers: { 'x-line-id-token': idToken } }),
+        ])
         const meData = await meRes.json() as MeResponse
         if (!meRes.ok || !meData.ok) throw new Error(mapApiError())
         setIdentified(!!meData.identified)
+
+        if (raffleRes.ok) {
+          const rd = await raffleRes.json() as RaffleResponse
+          if (rd.ok) {
+            setEntered(!!rd.entered)
+            setTotalCount(rd.total ?? null)
+            setMode(rd.mode === 'on' ? 'on' : 'off')
+            return
+          }
+        }
+        // Status fetch failed but identity is known — let them still enter
+        // (POST is idempotent, a double-enter is harmless).
+        setEntered(false)
       } catch (e) {
         setError(e instanceof Error ? e.message : mapApiError())
       }
@@ -151,14 +134,7 @@ export default function RaffleLiffPage() {
         <p className="mt-3 text-sm text-ink/60">嗨，{profile.displayName}</p>
       </header>
 
-      {win && (
-        <div className="mb-6">
-          <StatusBanner kind="success">
-            🎉 恭喜中獎：{win.prizeName}！請到主桌附近找工作人員領獎。
-          </StatusBanner>
-        </div>
-      )}
-      {mode === 'on' && !win && (
+      {mode === 'on' && (
         <div className="mb-6">
           <StatusBanner kind="info">抽獎進行中，請盯著大螢幕！</StatusBanner>
         </div>

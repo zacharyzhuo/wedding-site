@@ -1,6 +1,9 @@
-// GET  /api/raffle — has this LINE user entered? + total entrant count.
+// GET  /api/raffle — has this LINE user entered? + total entrant count +
+// raffle mode. Fetched once on load by the raffle LIFF page (no polling).
 // POST /api/raffle — enter the draw. Idempotent upsert keyed on the LINE
 // userId: one account = one entry, re-entering just refreshes name/avatar.
+// Entry stays open the whole time (no raffle-mode gate): present-to-win is
+// enforced at draw time via redraw, so late/last-minute entries are fine.
 //
 // Fallback identity: a guest can reach the raffle without ever RSVPing or
 // joining a party (e.g. they only added the OA and tapped the raffle rich
@@ -52,10 +55,11 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
     if (e instanceof LiffAuthError) return err(e.status, e.message)
     throw e
   }
-  // Four independent reads batched in parallel — same rationale as
-  // screen/feed.ts: every D1 query is a network round-trip, and this
-  // endpoint gets polled every 5s from the raffle LIFF page.
-  const [entered, totalN, modeRow, winRow] = await Promise.all([
+  // Three independent reads batched in parallel — same rationale as
+  // screen/feed.ts: every D1 query is a network round-trip. This endpoint is
+  // fetched once when the raffle LIFF page loads (no polling); winners are
+  // announced on the venue screen, so no per-user win lookup is needed here.
+  const [entered, totalN, modeRow] = await Promise.all([
     env.DB
       .prepare(`SELECT 1 AS x FROM raffle_entries WHERE line_user_id = ?`)
       .bind(user.userId)
@@ -64,23 +68,11 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
     env.DB
       .prepare(`SELECT value FROM settings WHERE key = 'raffle_mode'`)
       .first<{ value: string }>(),
-    // raffle_draws.prize is a name snapshot taken at draw time (see
-    // migrations/0002_raffle.sql), so this already resolves to the prize
-    // name without a join to raffle_prizes.
-    env.DB
-      .prepare(
-        `SELECT prize FROM raffle_draws
-         WHERE winner_id = ? AND status = 'active'
-         ORDER BY id DESC LIMIT 1`
-      )
-      .bind(user.userId)
-      .first<{ prize: string }>(),
   ])
   return ok({
     entered: entered !== null,
     total: totalN,
     mode: modeRow?.value === 'on' ? 'on' : 'off',
-    win: winRow ? { prizeName: winRow.prize } : null,
   })
 }
 

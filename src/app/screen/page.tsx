@@ -511,8 +511,8 @@ export default function ScreenPage() {
             </ul>
           )}
           <p className="raffle-standby-hint">
-            {raffleStandby ? `目前 ${raffleStandby.total} 人參加` : ''}
-            　·　官方帳號選單「抽獎」即可報名
+            還沒報名嗎？現在還來得及　·　打開官方帳號選單，點「抽獎」馬上報名
+            {raffleStandby ? `　·　目前 ${raffleStandby.total} 人參加` : ''}
           </p>
         </div>
       )}
