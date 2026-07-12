@@ -11,6 +11,7 @@ import { readModerationMode } from '../../_lib/moderation'
 
 interface Env {
   DB: D1Database
+  TEST_TOOLS?: string
   LINE_LOGIN_CHANNEL_ID?: string
   ADMIN_LINE_USER_IDS?: string
   R2_ACCOUNT_ID?: string
@@ -83,5 +84,7 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
   // this on in the admin (default off, so cards stay hidden until the reveal).
   const thankyouMode = thankyouRow?.value === 'on' ? 'on' : 'off'
 
-  return json(200, { ok: true, mode, thankyouMode, danmaku, photos })
+  // testTools drives the admin 測試 tab's visibility (flag lives server-side
+  // so flipping it off in the dashboard hides the tab on the next poll).
+  return json(200, { ok: true, mode, thankyouMode, danmaku, photos, testTools: env.TEST_TOOLS === 'on' })
 }

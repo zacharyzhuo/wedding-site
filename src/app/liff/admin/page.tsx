@@ -69,6 +69,7 @@ const TABS = [
   ['raffle', '抽獎'],
   ['thankyou', '悄悄話'],
   ['identity', '身分'],
+  ['test', '測試'], // only rendered while the server reports TEST_TOOLS=on
 ] as const
 type TabKey = (typeof TABS)[number][0]
 const VALID_TABS: readonly string[] = TABS.map(([key]) => key)
@@ -87,6 +88,11 @@ export default function AdminLiffPage() {
   const [tab, setTab] = useState<TabKey>('danmaku')
   const [raffleTotal, setRaffleTotal] = useState(0)
   const [raffleMode, setRaffleMode] = useState<'on' | 'off'>('off')
+  const [testTools, setTestTools] = useState(false)
+  const [wipeConfirmDanmaku, setWipeConfirmDanmaku] = useState('')
+  const [wipeConfirmRaffle, setWipeConfirmRaffle] = useState('')
+  const [wipeResult, setWipeResult] = useState<string | null>(null)
+  const [wiping, setWiping] = useState(false)
   const [raffleModeStartedAt, setRaffleModeStartedAt] = useState<number | null>(null)
   const [prizes, setPrizes] = useState<RafflePrize[]>([])
   const [draws, setDraws] = useState<RaffleDraw[]>([])
@@ -154,12 +160,13 @@ export default function AdminLiffPage() {
       if (!res.ok) { setPollFailCount(c => c + 1); return }
       const data = await res.json() as {
         ok: boolean; mode: 'auto' | 'manual'; thankyouMode?: 'on' | 'off'
-        danmaku: DanmakuItem[]; photos: PhotoItem[]
+        danmaku: DanmakuItem[]; photos: PhotoItem[]; testTools?: boolean
       }
       setMode(data.mode)
       setThankyouMode(data.thankyouMode ?? 'off')
       setDanmaku(data.danmaku)
       setPhotos(data.photos)
+      setTestTools(data.testTools === true)
       setAuthState('ok')
       setPollFailCount(0)
       // Raffle state rides the same refresh cadence; a failure here should
@@ -364,6 +371,37 @@ export default function AdminLiffPage() {
     }
   }
 
+  async function runTestTool(action: string, confirm?: string) {
+    setWiping(true)
+    setWipeResult(null)
+    try {
+      const res = await authedFetch('/api/admin/test-tools', {
+        method: 'POST', body: JSON.stringify({ action, confirm }),
+      })
+      const data = await res.json().catch(() => null) as Record<string, unknown> | null
+      if (!res.ok) {
+        flashActionError(typeof data?.error === 'string' ? data.error : '清除失敗')
+        return
+      }
+      if (action === 'wipe_danmaku_photos') {
+        setWipeResult(`已清除彈幕 ${data?.danmaku} 則、照片 ${data?.photos} 張（R2 ${data?.r2Objects} 件）`)
+        setWipeConfirmDanmaku('')
+      } else if (action === 'wipe_raffle') {
+        setWipeResult(`已清除抽獎報名 ${data?.entries} 筆、抽獎紀錄 ${data?.draws} 筆`)
+        setWipeConfirmRaffle('')
+      } else {
+        setWipeResult(data?.identityDeleted
+          ? `已重置你的 RSVP${data?.partyDeleted ? `（你開的團已解散，鬆綁團員 ${data?.membersDetached} 人）` : ''}`
+          : '你目前沒有 RSVP 資料，不用重置')
+      }
+      await refresh()
+    } catch {
+      flashActionError('清除失敗，請再試一次')
+    } finally {
+      setWiping(false)
+    }
+  }
+
   async function addPrize() {
     const name = newPrizeName.trim()
     const quantity = Number(newPrizeQty)
@@ -494,7 +532,7 @@ export default function AdminLiffPage() {
       )}
 
       <nav className="mb-6 flex gap-2 overflow-x-auto border-b border-champagne pb-3 text-sm">
-        {TABS.map(([key, label]) => (
+        {TABS.filter(([key]) => key !== 'test' || testTools).map(([key, label]) => (
           <button
             key={key}
             className={`shrink-0 rounded-full px-4 py-1 ${tab === key ? 'bg-ink text-cream' : 'bg-white border border-champagne'}`}
@@ -817,6 +855,74 @@ export default function AdminLiffPage() {
           ))}
         </ul>
       </section>
+      )}
+
+      {tab === 'test' && testTools && (
+        <section className="space-y-5">
+          <StatusBanner kind="info">
+            測試工具：只在 TEST_TOOLS 開啟時出現，婚禮前記得到 Pages dashboard 關掉。
+            Google Sheet 的資料列不會被動到。
+          </StatusBanner>
+          {wipeResult && <StatusBanner kind="success">{wipeResult}</StatusBanner>}
+
+          <div className="rounded-md border border-champagne bg-white p-4">
+            <h2 className="text-sm font-medium">清空彈幕與照片</h2>
+            <p className="mt-1 text-xs text-ink/50">
+              刪除全部彈幕、照片與 R2 圖檔。輸入「清除」才能按。
+            </p>
+            <div className="mt-3 flex gap-2">
+              <input
+                className="field-input flex-1"
+                placeholder="輸入「清除」"
+                value={wipeConfirmDanmaku}
+                onChange={e => setWipeConfirmDanmaku(e.target.value)}
+              />
+              <ConfirmButton
+                label="清空"
+                confirmLabel="確定清空？"
+                className="btn-primary shrink-0 px-4 text-sm disabled:opacity-50"
+                disabled={wiping || wipeConfirmDanmaku.trim() !== '清除'}
+                onConfirm={() => runTestTool('wipe_danmaku_photos', wipeConfirmDanmaku.trim())}
+              />
+            </div>
+          </div>
+
+          <div className="rounded-md border border-champagne bg-white p-4">
+            <h2 className="text-sm font-medium">清空抽獎資料</h2>
+            <p className="mt-1 text-xs text-ink/50">
+              刪除全部報名與抽獎紀錄；獎項清單會保留。輸入「清除」才能按。
+            </p>
+            <div className="mt-3 flex gap-2">
+              <input
+                className="field-input flex-1"
+                placeholder="輸入「清除」"
+                value={wipeConfirmRaffle}
+                onChange={e => setWipeConfirmRaffle(e.target.value)}
+              />
+              <ConfirmButton
+                label="清空"
+                confirmLabel="確定清空？"
+                className="btn-primary shrink-0 px-4 text-sm disabled:opacity-50"
+                disabled={wiping || wipeConfirmRaffle.trim() !== '清除'}
+                onConfirm={() => runTestTool('wipe_raffle', wipeConfirmRaffle.trim())}
+              />
+            </div>
+          </div>
+
+          <div className="rounded-md border border-champagne bg-white p-4">
+            <h2 className="text-sm font-medium">重置我自己的 RSVP</h2>
+            <p className="mt-1 text-xs text-ink/50">
+              只刪你自己的身分資料；你開的團會解散、團員鬆綁但不會被刪。用來重測全新的填寫流程。
+            </p>
+            <ConfirmButton
+              label="重置"
+              confirmLabel="確定重置？"
+              className="btn-primary mt-3 px-4 text-sm disabled:opacity-50"
+              disabled={wiping}
+              onConfirm={() => runTestTool('reset_my_rsvp')}
+            />
+          </div>
+        </section>
       )}
     </main>
   )
