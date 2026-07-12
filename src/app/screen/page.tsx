@@ -408,8 +408,20 @@ export default function ScreenPage() {
       {/* Photo carousel */}
       <div className="absolute inset-0">
         {currentPhoto === null ? (
-          <div className="absolute inset-0 flex items-center justify-center text-cream/40 text-2xl">
-            等待第一張照片…
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-8 px-16 text-center">
+            <p className="font-script text-4xl text-champagne">Share your moments</p>
+            <h2 className="font-display text-7xl leading-tight tracking-wide text-cream">
+              留言 與 照片牆
+            </h2>
+            <p className="max-w-4xl text-3xl leading-relaxed text-cream/80">
+              打開官方帳號「皖美育見你」，點選
+              <span className="mx-1 text-champagne">想對新人說</span>
+              <br />
+              你的祝福與照片，會即時出現在這個大螢幕上
+            </p>
+            <p className="mt-6 animate-pulse text-xl tracking-widest text-cream/40 motion-reduce:animate-none">
+              等待第一張照片
+            </p>
           </div>
         ) : (
           /* Only the outgoing and incoming slides live in the DOM — the
