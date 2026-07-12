@@ -126,10 +126,33 @@ function handleIdentity_(body) {
   return jsonOk_({ ok: true, mode: mode });
 }
 
+// Formula-injection guard. Guest-controlled free-text fields (notes,
+// message, real_name, …) are written straight into cells; a value starting
+// with = + - @ (or a leading tab/CR that Sheets trims into one) is
+// interpreted as a FORMULA and runs server-side when the couple opens the
+// Sheet — e.g. =IMPORTXML(...) could exfiltrate the whole guest list. We
+// prefix such values with a single quote (Sheets renders it as plain text,
+// the quote itself is not shown) and cap length to blunt oversized payloads.
+// Numbers and empty strings pass through untouched.
+const DANGEROUS_PREFIX = /^[=+\-@\t\r]/;
+const MAX_CELL_LEN = 500;
+
+function sanitizeCell_(v) {
+  if (typeof v !== 'string') return v;
+  const s = v.length > MAX_CELL_LEN ? v.slice(0, MAX_CELL_LEN) : v;
+  return DANGEROUS_PREFIX.test(s) ? "'" + s : s;
+}
+
+function sanitizeRow_(row) {
+  return row.map(sanitizeCell_);
+}
+
 // Generic UPSERT: updates the row whose value in keyCol matches keyValue, or
 // appends a new row if no match (or no keyValue) is found. Shared by all
-// three tabs above.
+// three tabs above. Every data row is sanitized here so no handler can
+// forget it.
 function upsertRow_(sheet, keyCol, keyValue, row) {
+  row = sanitizeRow_(row);
   const existingRow = keyValue ? findRowByKey_(sheet, keyCol, keyValue) : -1;
   if (existingRow > 0) {
     sheet.getRange(existingRow, 1, 1, row.length).setValues([row]);
