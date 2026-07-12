@@ -791,10 +791,16 @@ export default function AdminLiffPage() {
                 <p className="truncate text-xs text-ink/60">{p.uploaderName}</p>
                 {p.caption && <p className="truncate text-xs text-ink/40">{p.caption}</p>}
                 {p.status === 'pending' ? (
-                  <button
-                    className="mt-2 w-full rounded bg-emerald-600 px-2 py-1 text-xs text-cream"
-                    onClick={() => approvePhoto(p.id)}
-                  >通過</button>
+                  <div className="mt-2 flex gap-1">
+                    <button
+                      className="w-full rounded bg-emerald-600 px-2 py-1 text-xs text-cream"
+                      onClick={() => approvePhoto(p.id)}
+                    >通過</button>
+                    <button
+                      className="w-full rounded bg-red-600 px-2 py-1 text-xs text-cream"
+                      onClick={() => setPhotoStatus(p.id, 'hide')}
+                    >隱藏</button>
+                  </div>
                 ) : (
                   <button
                     className={`mt-2 w-full rounded px-2 py-1 text-xs ${

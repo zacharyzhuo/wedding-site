@@ -78,64 +78,64 @@ Shared read-only for everyone: `functions/_lib/*` (moderation.ts reused as-is; f
 - `ConfirmButton({ label, confirmLabel, onConfirm, className?, disabled? })` — two-tap confirm, 3s auto-revert, `aria-live="polite"` on label swap.
 - `StatusBanner({ kind: 'error'|'success'|'info', children })` — `aria-live="polite"` wrapper for all async status messages.
 
-- [ ] `ui.tsx` with the six components above, styled with existing tokens (champagne borders, cream bg, ink text; offset solid shadow `shadow-[10px_10px_0_#e8dccb]` on a `Card` variant for LIFF use).
-- [ ] globals.css: `:root` CSS vars for the four palette hexes; replace raw duplicated hexes at former lines ~251,262,298,315,323 with `var(...)`.
-- [ ] globals.css: `.field-input` focus → `:focus-visible`; add `button, a, input, select, textarea, [role="button"] { touch-action: manipulation; }`; add `.spinner` keyframe.
-- [ ] globals.css: `@media (prefers-reduced-motion: reduce)` — hero-up/reveal render final state instantly; invite-marquee paused; danmaku-fly becomes fade-in/out; carousel-fade kept (essential, slow); confetti-fall and gate-pulse and raffle-pop disabled or reduced to opacity.
-- [ ] layout.tsx: add `viewport` export with `themeColor: '#faf7f1'`.
-- [ ] page.tsx: remove `查看座位` from CTA copy (feature unshipped); countdown digits get `tabular-nums`; scroll-hint arrow gets `motion-reduce:animate-none`; replace local Eyebrow with the shared import (single spacing mechanism: drop manual full-width spaces OR tracking, not both).
-- [ ] Verify: `npx tsc --noEmit` clean, `npm run build` green.
+- [x] `ui.tsx` with the six components above, styled with existing tokens (champagne borders, cream bg, ink text; offset solid shadow `shadow-[10px_10px_0_#e8dccb]` on a `Card` variant for LIFF use).
+- [x] globals.css: `:root` CSS vars for the four palette hexes; replace raw duplicated hexes at former lines ~251,262,298,315,323 with `var(...)`.
+- [x] globals.css: `.field-input` focus → `:focus-visible`; add `button, a, input, select, textarea, [role="button"] { touch-action: manipulation; }`; add `.spinner` keyframe.
+- [x] globals.css: `@media (prefers-reduced-motion: reduce)` — hero-up/reveal render final state instantly; invite-marquee paused; danmaku-fly becomes fade-in/out; carousel-fade kept (essential, slow); confetti-fall and gate-pulse and raffle-pop disabled or reduced to opacity.
+- [x] layout.tsx: add `viewport` export with `themeColor: '#faf7f1'`.
+- [x] page.tsx: remove `查看座位` from CTA copy (feature unshipped); countdown digits get `tabular-nums`; scroll-hint arrow gets `motion-reduce:animate-none`; replace local Eyebrow with the shared import (single spacing mechanism: drop manual full-width spaces OR tracking, not both).
+- [x] Verify: `npx tsc --noEmit` clean, `npm run build` green.
 
 ### Task 2 (WP-A): Admin resilience, safety, raffle backend — wave 2
 
 **Files:** `src/app/liff/admin/page.tsx`, `functions/api/admin/**`.
 **Consumes:** ui.tsx components, contracts 1 & 5.
 
-- [ ] Resilience: transient fetch failures no longer kill the 5s poll; degraded banner `連線不穩，重試中…` while consecutive failures > 0; error screen (real auth failure only) gets `重新連線` retry button; auth check auto-retries with backoff (3 attempts).
-- [ ] Shared action-error toast: every mutating action that reverts an optimistic update surfaces one toast (StatusBanner, auto-dismiss 5s).
-- [ ] Photo moderation UI: pending photos visible in 照片 tab with `通過` button (contract 1); `[id].ts` accepts `approve`; feed returns pending photos; mode.ts mirrors message demote behavior for photos; AUTO/MANUAL toggle relabeled `審核模式（彈幕與照片）`.
-- [ ] Confirmations: delete danmaku, prize delete, 開抽, 重抽 all via ConfirmButton; deleted danmaku rows show `復原` (sets visible); prize delete promoted from text link to padded button.
-- [ ] Winner suspense: after draw resolves, admin shows `大螢幕開獎中…` for 3s before revealing the name.
-- [ ] Bulk `全部通過（n）` on the pending danmaku filter (sequential calls to existing endpoint).
-- [ ] Raffle ops: draw.ts conditional-insert atomicity (contract 5); prizes.ts DELETE rejects when draws reference the prize (400 with zh error); redraw missing-prize → specific `獎品已不存在` error; addPrize inline validation (quantity ≥ 1 integer) with visible hint; raffle tab shows `抽獎模式已開啟 X 分鐘` elapsed hint; 得獎紀錄 section moved above prize management.
-- [ ] Tabs: overflow-x-auto + shrink-0; active tab synced to `?tab=` query param (read on mount, replaceState on change).
-- [ ] Verify: `npx tsc --noEmit` clean; flag anything requiring foreign files.
+- [x] Resilience: transient fetch failures no longer kill the 5s poll; degraded banner `連線不穩，重試中…` while consecutive failures > 0; error screen (real auth failure only) gets `重新連線` retry button; auth check auto-retries with backoff (3 attempts).
+- [x] Shared action-error toast: every mutating action that reverts an optimistic update surfaces one toast (StatusBanner, auto-dismiss 5s).
+- [x] Photo moderation UI: pending photos visible in 照片 tab with `通過` button (contract 1); `[id].ts` accepts `approve`; feed returns pending photos; mode.ts mirrors message demote behavior for photos; AUTO/MANUAL toggle relabeled `審核模式（彈幕與照片）`.
+- [x] Confirmations: delete danmaku, prize delete, 開抽, 重抽 all via ConfirmButton; deleted danmaku rows show `復原` (sets visible); prize delete promoted from text link to padded button.
+- [x] Winner suspense: after draw resolves, admin shows `大螢幕開獎中…` for 3s before revealing the name.
+- [x] Bulk `全部通過（n）` on the pending danmaku filter (sequential calls to existing endpoint).
+- [x] Raffle ops: draw.ts conditional-insert atomicity (contract 5); prizes.ts DELETE rejects when draws reference the prize (400 with zh error); redraw missing-prize → specific `獎品已不存在` error; addPrize inline validation (quantity ≥ 1 integer) with visible hint; raffle tab shows `抽獎模式已開啟 X 分鐘` elapsed hint; 得獎紀錄 section moved above prize management.
+- [x] Tabs: overflow-x-auto + shrink-0; active tab synced to `?tab=` query param (read on mount, replaceState on change).
+- [x] Verify: `npx tsc --noEmit` clean; flag anything requiring foreign files.
 
 ### Task 3 (WP-B): RSVP flow + elderly fallback — wave 2
 
 **Files:** `src/app/liff/rsvp/page.tsx`, `src/app/liff/join/page.tsx`, `src/app/rsvp-fallback/page.tsx`, `functions/api/rsvp.ts`, `functions/api/party/join.ts`, `functions/api/party/member-diet.ts`, `src/lib/diet.ts` (+ new test file).
 **Consumes:** ui.tsx components, contracts 3 & 4.
 
-- [ ] Not-attending branch: LeaderDoneView checks attending; not-attending → simple thanks view (pinned copy), no share/progress UI, keeps `修改回覆` edit entry.
-- [ ] Edit cancel: `取消` link in edit form returns to done view without submitting.
-- [ ] Join mismatch: when resolved party ≠ tapped code's party, show pinned mismatch notice instead of generic success; join API response must expose enough info (resolved leaderName + mismatch flag).
-- [ ] Join preflight: GET validation on mount (contract 3); invalid → notice immediately (no wasted form fill); valid → form headline personalizes with leaderName.
-- [ ] Member self-service: MemberDedupView also edits own realName (contract 4); join done screen links to diet/name update path.
-- [ ] Submit buttons stay enabled; on submit with missing fields show inline hints (pinned strings) via Field error + StatusBanner; all three forms.
-- [ ] Diet detail: selecting 食物過敏/其他 reveals a text input (pinned label); value merges into diet string as `食物過敏（花生）`; merge logic as pure fn `buildDietValue(diet, detail)` in src/lib/diet.ts with vitest cases (no detail, detail trimmed, parens stripped from user input).
-- [ ] Progress auto-refresh: refetch party progress on `visibilitychange`→visible in addition to the manual button.
-- [ ] Fallback page: base font `text-lg`, taller inputs/buttons (min-h 48px); add notes textarea (wired into POST, replacing hardcoded `''`); resubmit warning (pinned copy) above submit; non-2xx parses JSON `error` field first, falls back to friendly generic; inputs get `name` + `autoComplete`.
-- [ ] All inputs across the three forms get `name`/`autoComplete`; async status text wrapped in StatusBanner.
-- [ ] Verify: `npx vitest run` green incl. new diet tests; `npx tsc --noEmit` clean.
+- [x] Not-attending branch: LeaderDoneView checks attending; not-attending → simple thanks view (pinned copy), no share/progress UI, keeps `修改回覆` edit entry.
+- [x] Edit cancel: `取消` link in edit form returns to done view without submitting.
+- [x] Join mismatch: when resolved party ≠ tapped code's party, show pinned mismatch notice instead of generic success; join API response must expose enough info (resolved leaderName + mismatch flag).
+- [x] Join preflight: GET validation on mount (contract 3); invalid → notice immediately (no wasted form fill); valid → form headline personalizes with leaderName.
+- [x] Member self-service: MemberDedupView also edits own realName (contract 4); join done screen links to diet/name update path.
+- [x] Submit buttons stay enabled; on submit with missing fields show inline hints (pinned strings) via Field error + StatusBanner; all three forms.
+- [x] Diet detail: selecting 食物過敏/其他 reveals a text input (pinned label); value merges into diet string as `食物過敏（花生）`; merge logic as pure fn `buildDietValue(diet, detail)` in src/lib/diet.ts with vitest cases (no detail, detail trimmed, parens stripped from user input).
+- [x] Progress auto-refresh: refetch party progress on `visibilitychange`→visible in addition to the manual button.
+- [x] Fallback page: base font `text-lg`, taller inputs/buttons (min-h 48px); add notes textarea (wired into POST, replacing hardcoded `''`); resubmit warning (pinned copy) above submit; non-2xx parses JSON `error` field first, falls back to friendly generic; inputs get `name` + `autoComplete`.
+- [x] All inputs across the three forms get `name`/`autoComplete`; async status text wrapped in StatusBanner.
+- [x] Verify: `npx vitest run` green incl. new diet tests; `npx tsc --noEmit` clean.
 
 ### Task 4 (WP-C): Day-of guest surfaces + screen — wave 2
 
 **Files:** `src/app/liff/danmaku/page.tsx`, `src/app/liff/raffle/page.tsx`, `src/app/screen/page.tsx`, `functions/api/photos/index.ts`, `functions/api/raffle.ts`, `functions/api/screen/feed.ts`, `src/lib/image-resize.ts`, `src/lib/upload-errors.ts` (new + test).
 **Consumes:** ui.tsx components, contracts 1 & 2.
 
-- [ ] Photo moderation guest side (contract 1): commit uses decideStatus; done copy branches on returned status (pending → pinned copy); screen feed filters visible only.
-- [ ] Upload UX: XHR-based PUT with `upload.onprogress` determinate bar; multi-file support (`multiple` file input, sequential pipeline, `第 x/y 張` progress, message attaches to first photo); per-file failure allows retry of remaining.
-- [ ] Error mapping: `src/lib/upload-errors.ts` exports `mapUploadError(err): string` per pinned map; image-resize.ts throws coded errors (`DECODE_FAILED` etc.) instead of English prose; danmaku page routes ALL thrown errors through the map; vitest for the map.
-- [ ] Raffle page: GET per contract 2; poll every 5s while open; win → pinned win banner; mode on → pinned mode banner; live entrant count keeps updating after entry.
-- [ ] Screen: audio-gate unlocked flag in sessionStorage (reload doesn't re-block display; audio re-arms on next gesture); gate becomes `<button>` (keyboard + role semantics); carousel slides render caption + uploaderName overlay (small, bottom, ink-on-cream chip); `<img>` elements get explicit width/height; confetti palette derived from tokens (champagne/accent/cream tints only).
-- [ ] Spinners: replace bare `載入中…` in danmaku + raffle pages with Spinner component.
-- [ ] Verify: `npx vitest run` green incl. upload-errors tests; `npx tsc --noEmit` clean.
+- [x] Photo moderation guest side (contract 1): commit uses decideStatus; done copy branches on returned status (pending → pinned copy); screen feed filters visible only.
+- [x] Upload UX: XHR-based PUT with `upload.onprogress` determinate bar; multi-file support (`multiple` file input, sequential pipeline, `第 x/y 張` progress, message attaches to first photo); per-file failure allows retry of remaining.
+- [x] Error mapping: `src/lib/upload-errors.ts` exports `mapUploadError(err): string` per pinned map; image-resize.ts throws coded errors (`DECODE_FAILED` etc.) instead of English prose; danmaku page routes ALL thrown errors through the map; vitest for the map.
+- [x] Raffle page: GET per contract 2; poll every 5s while open; win → pinned win banner; mode on → pinned mode banner; live entrant count keeps updating after entry.
+- [x] Screen: audio-gate unlocked flag in sessionStorage (reload doesn't re-block display; audio re-arms on next gesture); gate becomes `<button>` (keyboard + role semantics); carousel slides render caption + uploaderName overlay (small, bottom, ink-on-cream chip); `<img>` elements get explicit width/height; confetti palette derived from tokens (champagne/accent/cream tints only).
+- [x] Spinners: replace bare `載入中…` in danmaku + raffle pages with Spinner component.
+- [x] Verify: `npx vitest run` green incl. upload-errors tests; `npx tsc --noEmit` clean.
 
 ### Task 5: Integration verification — wave 3 (dispatcher runs)
 
-- [ ] `npx tsc --noEmit` clean.
-- [ ] `npx vitest run` green (identity + diet + upload-errors).
-- [ ] `npm run build` (static export) green.
-- [ ] Fresh-context review agent verifies each task's checkboxes against the diff, adversarially (no scope creep, contracts honored, copy strings exact).
-- [ ] Wave commits on `feat/ux-audit-fixes` (dispatcher, plain-text messages).
-- [ ] Report to user; deploy/merge decision stays with the user.
+- [x] `npx tsc --noEmit` clean.
+- [x] `npx vitest run` green (identity + diet + upload-errors).
+- [x] `npm run build` (static export) green.
+- [x] Fresh-context review agent verifies each task's checkboxes against the diff, adversarially (no scope creep, contracts honored, copy strings exact).
+- [x] Wave commits on `feat/ux-audit-fixes` (dispatcher, plain-text messages).
+- [x] Report to user; deploy/merge decision stays with the user.
