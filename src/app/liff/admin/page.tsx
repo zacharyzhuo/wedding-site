@@ -603,6 +603,7 @@ export default function AdminLiffPage() {
         )}
         <p className="mb-5 text-xs text-ink/40">
           抽獎時間開啟時，大螢幕會顯示「抽獎時間」與獎項清單；開抽後 3 秒內播放開獎動畫。
+          {raffleMode !== 'on' && ' 開抽與重抽要先開始抽獎時間才能按。'}
         </p>
 
         {draws.length > 0 && (
@@ -630,7 +631,7 @@ export default function AdminLiffPage() {
                         label="人不在，重抽"
                         confirmLabel="確定重抽？"
                         className="shrink-0 rounded bg-amber-600 px-2 py-1 text-xs text-cream disabled:opacity-50"
-                        disabled={drawing}
+                        disabled={drawing || raffleMode !== 'on'}
                         onConfirm={() => redraw(d)}
                       />
                     )}
@@ -660,7 +661,7 @@ export default function AdminLiffPage() {
                     label={drawing ? '抽獎中…' : '開抽 🎲'}
                     confirmLabel="確定開抽？"
                     className="btn-primary px-4 py-1 text-sm disabled:opacity-50"
-                    disabled={drawing || p.remaining === 0}
+                    disabled={drawing || p.remaining === 0 || raffleMode !== 'on'}
                     onConfirm={() => doDraw(p.id)}
                   />
                   {p.remaining === p.quantity && (

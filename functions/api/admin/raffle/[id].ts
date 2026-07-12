@@ -30,6 +30,14 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env, params }
   const body = await readJson<Body>(request)
   if (body?.action !== 'forfeit') return err(400, 'action must be forfeit')
 
+  // Same gate as draw.ts: forfeit is half of the redraw flow, and gating
+  // only the draw half would leave a forfeited winner with no redraw when
+  // a stale admin page fires outside raffle time.
+  const mode = await env.DB
+    .prepare(`SELECT value FROM settings WHERE key = 'raffle_mode'`)
+    .first<{ value: string }>()
+  if (mode?.value !== 'on') return err(409, '抽獎時間未開啟，請先按「開始抽獎時間」')
+
   const res = await env.DB
     .prepare(`UPDATE raffle_draws SET status = 'forfeited' WHERE id = ? AND status = 'active'`)
     .bind(id)

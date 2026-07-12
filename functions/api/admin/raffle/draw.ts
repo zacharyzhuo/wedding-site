@@ -38,6 +38,15 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
   const prizeId = Number(body?.prizeId)
   if (!Number.isInteger(prizeId) || prizeId <= 0) return err(400, 'prizeId required')
 
+  // Draws are public moments — the screen only shows the standby/reveal
+  // while raffle_mode is on, so a draw outside raffle time would happen
+  // invisibly. Enforced here (not just disabled in the UI) because a second
+  // admin's stale page could still fire the request.
+  const mode = await env.DB
+    .prepare(`SELECT value FROM settings WHERE key = 'raffle_mode'`)
+    .first<{ value: string }>()
+  if (mode?.value !== 'on') return err(409, '抽獎時間未開啟，請先按「開始抽獎時間」')
+
   const prize = await env.DB
     .prepare(`SELECT id, name, quantity FROM raffle_prizes WHERE id = ?`)
     .bind(prizeId)
