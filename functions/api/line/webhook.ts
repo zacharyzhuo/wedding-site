@@ -1,11 +1,13 @@
 // POST /api/line/webhook — LINE Messaging API webhook.
 //
-// Single job today: the 悄悄話 thank-you cards. A guest types anything
-// containing 悄悄話 in the OA chat; we look up their personal card in D1
-// (keyed by LINE userId, synced from the planning Sheet) and reply with a
-// Flex card. No card → warm generic reply, never silence. Reply messages
-// are free and unlimited on the LINE free plan, which is exactly why this
-// feature is keyword-driven instead of push-driven.
+// Keyword-driven replies: 悄悄話 thank-you cards (any guest), 座位
+// placeholder (any guest), and the 後台 admin-console shortcut
+// (allowlisted userIds only, silence for everyone else). For 悄悄話 we
+// look up the guest's personal card in D1 (keyed by LINE userId, synced
+// from the planning Sheet) and reply with a Flex card. No card → warm
+// generic reply, never silence. Reply messages are free and unlimited on
+// the LINE free plan, which is exactly why these features are
+// keyword-driven instead of push-driven.
 //
 // Signature: X-Line-Signature = base64(HMAC-SHA256(channel secret, raw
 // body)). NOTE this is the MESSAGING API channel's secret
@@ -19,6 +21,8 @@ interface Env {
   DB: D1Database
   LINE_MESSAGING_CHANNEL_SECRET?: string
   LINE_CHANNEL_ACCESS_TOKEN?: string
+  ADMIN_LINE_USER_IDS?: string
+  NEXT_PUBLIC_LIFF_ID_ADMIN?: string
 }
 
 interface LineEvent {
@@ -30,6 +34,12 @@ interface LineEvent {
 
 const KEYWORD_THANKYOU = '悄悄話'
 const KEYWORD_SEAT = '座位'
+// Admin console shortcut. Exact match only (a command, not conversation),
+// and ONLY answered for userIds on the ADMIN_LINE_USER_IDS allowlist —
+// guests typing it get silence, so the keyword's existence never leaks.
+// The link itself is not the secret: every /api/admin/* call re-verifies
+// idToken + allowlist server-side and fails closed for non-admins.
+const KEYWORD_ADMIN = '後台'
 
 // Shown when a guest asks for 悄悄話 before the couple opens it in the admin.
 const THANKYOU_CLOSED_MESSAGE =
@@ -96,6 +106,52 @@ function flexCard(guestName: string | null, message: string) {
 const GENERIC_MESSAGE =
   '謝謝你來參加我們的婚禮，能與你共享這一天，是我們最大的幸福。'
 
+function isAdmin(userId: string | undefined, env: Env): boolean {
+  if (!userId) return false
+  const allow = (env.ADMIN_LINE_USER_IDS ?? '')
+    .split(',')
+    .map(s => s.trim())
+    .filter(Boolean)
+  return allow.includes(userId)
+}
+
+function adminConsoleFlex(liffId: string) {
+  return {
+    type: 'flex',
+    altText: '管理後台',
+    contents: {
+      type: 'bubble',
+      styles: { body: { backgroundColor: '#faf7f1' } },
+      body: {
+        type: 'box',
+        layout: 'vertical',
+        spacing: 'md',
+        paddingAll: '20px',
+        contents: [
+          { type: 'text', text: '管 理 後 台', size: 'xs', color: '#b98d6f' },
+          {
+            type: 'text',
+            text: '彈幕審核・照片・抽獎・悄悄話開關',
+            wrap: true,
+            size: 'sm',
+            color: '#3f3a36',
+          },
+          {
+            type: 'button',
+            style: 'primary',
+            color: '#a08254',
+            action: {
+              type: 'uri',
+              label: '開啟管理後台',
+              uri: `https://liff.line.me/${liffId}`,
+            },
+          },
+        ],
+      },
+    },
+  }
+}
+
 export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
   const secret = env.LINE_MESSAGING_CHANNEL_SECRET
   const token = env.LINE_CHANNEL_ACCESS_TOKEN
@@ -127,7 +183,12 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
     const text = (ev.message.text ?? '').normalize('NFKC').trim()
 
     let reply: object | null = null
-    if (text.includes(KEYWORD_THANKYOU)) {
+    if (text === KEYWORD_ADMIN) {
+      // Silence for non-admins is deliberate — see KEYWORD_ADMIN comment.
+      if (isAdmin(ev.source?.userId, env) && env.NEXT_PUBLIC_LIFF_ID_ADMIN) {
+        reply = adminConsoleFlex(env.NEXT_PUBLIC_LIFF_ID_ADMIN)
+      }
+    } else if (text.includes(KEYWORD_THANKYOU)) {
       if (!thankyouOpen) {
         // Gated: reveal not opened yet — reply a teaser, never the card.
         reply = textMessage(THANKYOU_CLOSED_MESSAGE)
