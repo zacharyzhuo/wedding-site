@@ -17,37 +17,70 @@ Architecture lives in `~/.claude/skills/wedding-planning/`.
 ```
 src/app/
   page.tsx                  public landing (CTA = add OA)
-  liff/rsvp/page.tsx        LIFF: RSVP
+  liff/rsvp/page.tsx        LIFF: RSVP (leader form, edit-prefill, party X/Y
+                            progress + share block; not-attending gets a
+                            plain thanks view)
+  liff/join/page.tsx        LIFF: companion joins a party via the leader's
+                            share link (GET preflight validates the code
+                            before showing the form)
   liff/danmaku/page.tsx     LIFF: 想對新人說 (text → danmaku wall; optional
-                            photo attach → R2 + caption-as-danmaku. Merged
-                            page — the standalone photo page was removed
-                            2026-07-05 to keep one rich-menu tile)
-  liff/admin/page.tsx       LIFF: 即時審核 (Zachary + Angelet only)
-  screen/page.tsx           大螢幕: photo carousel + danmaku overlay
-  rsvp-fallback/page.tsx    non-LINE web RSVP
+                            multi-photo attach → R2, sequential upload with
+                            progress; message binds to the first photo)
+  liff/raffle/page.tsx      LIFF: lucky-draw entry; polls GET /api/raffle
+                            every 5s for mode + personal win banner
+  liff/admin/page.tsx       LIFF: 即時審核 + 抽獎 ops (Zachary + Angelet only)
+  screen/page.tsx           大螢幕: photo carousel + danmaku overlay + raffle
+                            standby/reveal takeover (audio unlock persists in
+                            sessionStorage across reloads)
+  rsvp-fallback/page.tsx    non-LINE web RSVP (elderly-sized type/targets,
+                            append-only by design)
+src/components/
+  ui.tsx                    shared primitives: Eyebrow / Field / SelectField /
+                            Spinner / ConfirmButton (two-tap) / StatusBanner /
+                            Card — use these, don't re-roll per page
 src/lib/
   liff.ts                   LIFF init + profile hook
   liff-token.ts             liff.getIDToken() helper
   image-resize.ts           client-side canvas resize to ≤ 2048 px / 2 MB
+                            (throws coded errors, e.g. DECODE_FAILED)
+  upload-errors.ts          mapUploadError() — coded errors → zh-Hant copy
+  diet.ts                   diet options + allergy-detail merge (buildDietValue)
+  qr.ts                     share-link QR renderer
+  raffle-sound.ts           raffle reveal sound cues
 functions/_lib/
   http.ts                   json/ok/err/readJson helpers
   liff-verify.ts            server-side idToken verify (LINE /oauth2/v2.1/verify)
   admin.ts                  requireAdmin() — verify + allowlist gate
-  moderation.ts             keyword filter + auto/manual mode
+  moderation.ts             keyword filter + auto/manual mode (gates danmaku
+                            AND photos since 2026-07-12)
   r2-presign.ts             aws4fetch presigned PUT/GET URLs
+  identity.ts               guest_identity/party helpers (upsert/merge)
 functions/api/
-  rsvp.ts                   forwards to Apps Script
+  rsvp.ts                   forwards to Apps Script + builds leader joinUrl
+  party/join.ts             POST — companion joins; GET — preflight {leaderName}
+  party/member-diet.ts      POST — member self-service: diet + own realName
+  identity/me.ts            GET  — caller's identity/party state
   danmaku.ts                POST — submit a text danmaku
   photos/presign.ts         POST — get presigned R2 PUT URL
-  photos/index.ts           POST — commit metadata + auto-danmaku from caption
-  screen/feed.ts            GET  — polled by /screen
+  photos/index.ts           POST — commit metadata (+ caption-as-danmaku);
+                            status via decideStatus, returned to the client
+  raffle.ts                 POST — enter; GET — {entered,total,mode,win}
+  screen/feed.ts            GET  — polled by /screen (visible-only photos)
+  line/webhook.ts           POST — 悄悄話 Messaging API webhook (Flex cards)
   admin/check.ts            GET  — gate check for /liff/admin first load
-  admin/feed.ts             GET  — full feed for /liff/admin
-  admin/danmaku/[id].ts     POST — { action: delete | approve }
-  admin/photos/[id].ts      POST — { action: hide | unhide }
+  admin/feed.ts             GET  — full feed for /liff/admin (all statuses)
+  admin/danmaku/[id].ts     POST — { action: delete | approve } (approve also
+                            restores a deleted row)
+  admin/photos/[id].ts      POST — { action: hide | unhide | approve }
   admin/mode.ts             POST — { mode: auto | manual }
+  admin/raffle/*            mode / prizes CRUD / draw (atomic conditional
+                            INSERT — no oversell) / [id] redraw / index
+  admin/thankyou/mode.ts    POST — 悄悄話 reply toggle
+  admin/identity/*          GET list / POST set
 apps-script/rsvp-webhook.gs Sheet appender + email notifier
-migrations/0001_init.sql    D1 schema for danmaku + photos + settings
+migrations/0001-0006        D1: danmaku/photos/settings (key-value flags),
+                            raffle entries+draws, prizes, thankyou_cards,
+                            party + guest_identity, party message
 ```
 
 ---
@@ -173,7 +206,7 @@ In Pages → Settings → Environment variables (production):
 
 | Var | Value |
 |---|---|
-| `NEXT_PUBLIC_LIFF_ID_RSVP` / `_DANMAKU` / `_PHOTO` / `_ADMIN` | from step 5 |
+| `NEXT_PUBLIC_LIFF_ID_RSVP` / `_DANMAKU` / `_RAFFLE` / `_ADMIN` | from step 5 |
 | `NEXT_PUBLIC_LIFF_ID_JOIN` | join LIFF id (party-identity share link/QR target) |
 | `NEXT_PUBLIC_LINE_OA_ADD_FRIEND_URL` | `https://line.me/R/ti/p/@160vcltf` |
 | `LINE_LOGIN_CHANNEL_ID` | LINE Login channel ID (server, secret) |
